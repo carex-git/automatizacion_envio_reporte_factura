@@ -5,7 +5,8 @@ __pycache__/
 
 # C extensions
 *.so
-
+  
+#     ruta_archivo_excel = './data/IMPRESION 2 JULIO.xlsx'
 # Distribution / packaging
 .Python
 build/

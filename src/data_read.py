@@ -2,8 +2,8 @@
 Generador de Reportes de Facturación PDF
 ========================================
 
-Este módulo genera reportes de facturación individuales en formato PDF
-a partir de datos de un archivo Excel.
+Este módulo contiene todas las clases y funciones necesarias para cargar datos
+desde un archivo Excel y generar reportes de facturación individuales en PDF.
 
 Autor: Sistema de Facturación
 Fecha: 2025
@@ -13,8 +13,7 @@ import pandas as pd
 from fpdf import FPDF, XPos, YPos
 import os
 import math
-from typing import Dict, List, Any
-
+from typing import Dict, List, Any, Optional
 
 class ConfiguracionReporte:
     """Configuración centralizada para el reporte PDF"""
@@ -39,13 +38,15 @@ class ConfiguracionReporte:
     ALTURA_LINEA = 4
     
     # Rutas
+    DIRECTORIO_SALIDA_TEL = 'output/tel'
+    DIRECTORIO_SALIDA_EMAIL = 'output/email'
     DIRECTORIO_SALIDA = 'output'
     RUTA_LOGO = './logo.png'
     
     # Información de la empresa
     EMPRESA_NIT = '800.176.428-6'
     EMPRESA_NOMBRE = 'COMERCIALIZADORA INTERNACIONAL CARIBBEAN EXOTICS S. A.'
-    EMPRESA_DIRECCION = 'DIRECCIÓN NO DISPONIBLE'
+    EMPRESA_DIRECCION = 'Vda cimarronas Km 1 Rionegro-Marinilla'
     
     # Configuración de tabla
     ENCABEZADOS_TABLA = [
@@ -97,6 +98,156 @@ class UtilFormato:
         return "0.00%"
 
 
+class GestorDatos:
+    """Clase para gestionar la carga y procesamiento de datos desde Excel"""
+    
+    def __init__(self, archivo_excel: str):
+        self.archivo_excel = archivo_excel
+        self.df_liquidacion = pd.DataFrame()
+        self.df_cer_fl_gl = pd.DataFrame()
+        self.df_liquidacion = None
+        self.df_bd_pro = None
+        self.df_cer_fl_gl = None
+        
+    def cargar_datos(self):
+        """Carga todos los datos necesarios desde el archivo Excel"""
+        try:
+            # Cargar hoja principal BD LIQUIDACION
+            self.df_liquidacion = pd.read_excel(
+                self.archivo_excel, 
+                sheet_name='BD LIQUIDACION'
+            )
+            
+            self.df_liquidacion.columns = self.df_liquidacion.columns.str.strip()
+            
+            # Cargar hoja BD PRO para direcciones
+            try:
+                self.df_bd_pro = pd.read_excel(
+                    self.archivo_excel, 
+                    sheet_name='BD PRO'
+                )
+                self.df_bd_pro.columns = self.df_bd_pro.columns.str.strip()
+                print("Columnas de 'BD PRO':", self.df_bd_pro.columns)
+            except ValueError:
+                print("⚠️ Advertencia: No se encontró la hoja 'BD PRO'. Se usará dirección por defecto.")
+                self.df_bd_pro = pd.DataFrame()
+            
+            # Cargar hoja CER FL GL para certificaciones
+            try:
+                self.df_cer_fl_gl = pd.read_excel(
+                    self.archivo_excel, 
+                    sheet_name='CER FL GL'
+                )
+                
+                self.df_cer_fl_gl.columns = self.df_cer_fl_gl.columns.str.strip()
+                
+                print("Columnas de 'CER FL GL':", self.df_cer_fl_gl.columns)
+            except ValueError:
+                print("⚠️ Advertencia: No se encontró la hoja 'CER FL GL'. Se usarán certificaciones por defecto.")
+                self.df_cer_fl_gl = pd.DataFrame()
+            
+            return self._limpiar_datos()
+            
+        except FileNotFoundError:
+            raise FileNotFoundError(f"El archivo '{self.archivo_excel}' no se encontró.")
+        except ValueError as e:
+            raise ValueError(f"Error al cargar datos: {str(e)}")
+    
+    def _limpiar_datos(self):
+        """Limpia y prepara los datos para el procesamiento"""
+        # Limpiar datos principales
+        self.df_liquidacion['NOMBRE'] = self.df_liquidacion['NOMBRE'].fillna('Sin Nombre')
+        self.df_liquidacion['CEDULA'] = self.df_liquidacion['CEDULA'].fillna('000000')
+        
+        # Asegurar que las columnas numéricas estén correctas
+        columnas_numericas = [
+            'KILOS RECIBIDOS', 'KG. EXP', 'KG. NAL', 'KG. AVE',
+            'PRECIO EXP', 'PRECIO NAL', 'PRECIO AVE',
+            'TOTAL BRUTO', 'RETE FUENTE', 'FONDO HORTIFRU', 
+            'D 2500', 'DES ANALISIS', 'VALOR TOTAL'
+        ]
+        
+        for col in columnas_numericas:
+            if col in self.df_liquidacion.columns:
+                self.df_liquidacion[col] = pd.to_numeric(
+                    self.df_liquidacion[col], errors='coerce'
+                ).fillna(0)
+        
+        return self.df_liquidacion
+    
+    def obtener_info_cliente(self, cedula: str) -> Dict[str, Any]:
+        """Obtiene información completa del cliente desde BD PRO"""
+        info = {
+            'direccion': '',  # Por defecto
+            'municipio': '',
+            'telefono': '',
+            'email': ''
+        }
+        print("soy cedula: ",cedula)
+        
+        if not self.df_bd_pro.empty and cedula:
+            cliente_info = self.df_bd_pro[
+                self.df_bd_pro['Código'].astype(str).values == str(cedula)
+            ]
+            
+            if not cliente_info.empty:
+                fila = cliente_info.iloc[0]
+                
+                if 'Dirección 1' in cliente_info.columns and pd.notna(fila['Dirección 1']):
+                    info['direccion'] = str(fila['Dirección 1'])
+                
+                if 'Ciudad' in cliente_info.columns and pd.notna(fila['Ciudad']):
+                    info['municipio'] = str(fila['Ciudad'])
+                
+                if 'Celular' in cliente_info.columns and fila['Celular'] !='0' and fila['Celular'] !=0  and pd.notna(fila['Celular']) :
+                    info['telefono'] = str(fila['Celular'])
+                    
+                if 'Email' in cliente_info.columns and pd.notna(fila['Email']):
+                    info['email'] = str(fila['Email'])
+        
+        return info
+    
+    def obtener_certificacion(self, cedula: str, cert_tipo: str) -> Dict[str, str]:
+        """
+        Determina las certificaciones de un cliente buscando su cédula en
+        la hoja 'CER FL GL' y devuelve los datos en un diccionario.
+        """
+        certificaciones = {'flo': '', 'gap': ''}
+        
+        if pd.isna(cedula) or not str(cedula).strip():
+            return certificaciones
+
+        if not self.df_cer_fl_gl.empty:
+            # Buscar por cédula en la hoja de certificaciones
+            
+            cert_info = self.df_cer_fl_gl[
+                self.df_cer_fl_gl['CEDULA'].astype(str) == str(cedula)
+            ]
+
+            if not cert_info.empty:
+                fila = cert_info.iloc[0]
+                cert_tipo = cert_tipo.upper().strip()
+
+                if 'FL' in cert_tipo:
+                    id_asoc = str(fila.get('CERTIFICADO ASOC', '')).strip()
+                    id_carex = str(fila.get('CERTIFICADO CAREX', '')).strip()
+                    
+                    if id_asoc or id_carex:
+                        certificaciones['flo'] = (
+                            "CERTIFICADO FLO\n"
+                            f"ID. ASOC. {id_asoc}\n"
+                            f"ID. CAREX {id_carex}"
+                        )
+
+                if 'GL' in cert_tipo:
+                    ggn = str(fila.get('CERTIFICADO GLO', '')).strip()
+                    codigo = str(fila.get('CODIGO', '')).strip()
+                    if ggn:
+                        certificaciones['gap'] = f"GLOBALG.A.P.\n{codigo}"
+        
+        return certificaciones
+
+
 class ReporteCliente(FPDF):
     """
     Clase principal para generar reportes de facturación en PDF
@@ -114,6 +265,11 @@ class ReporteCliente(FPDF):
         )
         self._configurar_pdf()
         self._crear_directorio_salida()
+        self.certificacion_flo = ""
+        self.certificacion_gap = ""
+        self.DIRECTORIO_SALIDA = ConfiguracionReporte.DIRECTORIO_SALIDA
+        self.DIRECTORIO_SALIDA_EMAIL = ConfiguracionReporte.DIRECTORIO_SALIDA_EMAIL
+        self.DIRECTORIO_SALIDA_TEL = ConfiguracionReporte.DIRECTORIO_SALIDA_TEL
     
     def _configurar_pdf(self):
         """Configura los parámetros básicos del PDF"""
@@ -130,13 +286,15 @@ class ReporteCliente(FPDF):
     def _crear_directorio_salida(self):
         """Crea el directorio de salida si no existe"""
         os.makedirs(ConfiguracionReporte.DIRECTORIO_SALIDA, exist_ok=True)
+        os.makedirs(ConfiguracionReporte.DIRECTORIO_SALIDA_TEL, exist_ok=True)
+        os.makedirs(ConfiguracionReporte.DIRECTORIO_SALIDA_EMAIL, exist_ok=True)
     
     def header(self):
         """Define el encabezado de cada página"""
         self._agregar_logo()
         self._agregar_titulo_principal()
         self._agregar_subtitulo()
-        self.ln(12)
+        self.ln(8)
     
     def _agregar_logo(self):
         """Agrega el logo de la empresa al encabezado"""
@@ -161,14 +319,17 @@ class ReporteCliente(FPDF):
     
     def _agregar_subtitulo(self):
         """Agrega el subtítulo del documento"""
+        subtitle = 'SEGUNDA QUINCENA DE JULIO'
+        x_posicion = self.w / 2 - self.get_string_width(subtitle) / 2
+        self.set_x(x_posicion)
         self.set_font('Helvetica', '', 12)
         self.cell(
-            -20, 10, 'SEGUNDA QUINCENA DE JULIO',
+            90, 10, subtitle,
             align='C', 
-            new_x=XPos.LEFT, 
+            new_x=XPos.LMARGIN, 
             new_y=YPos.NEXT
         )
-    
+
     def footer(self):
         """Define el pie de página"""
         self.set_y(-15)
@@ -179,31 +340,65 @@ class ReporteCliente(FPDF):
             new_x=XPos.LMARGIN, 
             new_y=YPos.NEXT
         )
+
+    def _agregar_certificacion_final(self):
+        """
+        Agrega los recuadros de certificación. 
+        Este método se debe llamar explícitamente al final del documento.
+        """
+        self.set_y(-25) 
+        self.set_font('Helvetica', 'B', 10)
+        
+        ancho_cert = 50
+        altura_cert = 15
+        
+        # Dibujar el recuadro de la certificación FLO si existe
+        if self.certificacion_flo:
+            self.set_x(10)
+            self.set_fill_color(230, 230, 230)
+            self.rect(self.get_x(), self.get_y(), ancho_cert, altura_cert, 'DF')
+            self.multi_cell(
+                ancho_cert, 4, self.certificacion_flo,
+                border=1, align='C',
+                new_x=XPos.RIGHT, new_y=YPos.TOP
+            )
+        
+        # Dibujar el recuadro de la certificación GLOBALG.A.P. si existe
+        if self.certificacion_gap:
+            self.set_x(10 + ancho_cert + 5 if self.certificacion_flo else 10)
+            self.set_y(-25)
+            self.set_fill_color(230, 230, 230)
+            self.rect(self.get_x(), self.get_y(), ancho_cert, altura_cert, 'DF')
+            self.multi_cell(
+                ancho_cert, 4, self.certificacion_gap,
+                border=1, align='C',
+                new_x=XPos.RIGHT, new_y=YPos.TOP
+            )
+        
+        self.set_y(-15)
     
-    def agregar_informacion_cliente(self, datos_cliente: pd.DataFrame):
+    def establecer_certificacion(self, certificaciones: Dict[str, str]):
+        """Establece los textos de certificación para mostrar en el footer"""
+        self.certificacion_flo = certificaciones.get('flo', '')
+        self.certificacion_gap = certificaciones.get('gap', '')
+    
+    def agregar_informacion_cliente(self, datos_cliente: pd.DataFrame, info_adicional: Dict[str, Any]):
         """
         Agrega la información del cliente al reporte con formato mejorado
-        
-        Args:
-            datos_cliente: DataFrame con los datos del cliente
         """
         self._configurar_colores_info()
         
-        # Configurar dimensiones de la tabla de información
         ancho_total = self.w - self.l_margin - self.r_margin
-        ancho_izquierda = ancho_total * 0.5  # 50% para cliente
-        ancho_derecha = ancho_total * 0.5    # 50% para comprador
+        ancho_izquierda = ancho_total * 0.4
+        ancho_derecha = ancho_total * 0.4
         
-        # Fila 1: Nombre/Razón Social y Comprador
         self._agregar_fila_nombre_comprador_mejorada(datos_cliente, ancho_izquierda, ancho_derecha)
-        
-        # Fila 2: Cédula/NIT y NIT empresa
         self._agregar_fila_cedulas_mejorada(datos_cliente, ancho_izquierda, ancho_derecha)
+        self._agregar_fila_direcciones_mejorada(ancho_izquierda, ancho_derecha, info_adicional)
         
-        # Fila 3: Direcciones
-        self._agregar_fila_direcciones_mejorada(ancho_izquierda, ancho_derecha)
+        if info_adicional.get('municipio') or info_adicional.get('telefono'):
+            self._agregar_fila_municipio_telefono(ancho_izquierda, ancho_derecha, info_adicional)
         
-        # Título de detalle
         self._agregar_titulo_detalle()
     
     def _configurar_colores_info(self):
@@ -216,34 +411,28 @@ class ReporteCliente(FPDF):
         y_inicio = self.get_y()
         x_inicio = self.get_x()
         
-        # Datos a mostrar
         comprador_text = ConfiguracionReporte.EMPRESA_NOMBRE
         nombre_cliente = str(datos_cliente.iloc[0]['NOMBRE'])
         
-        # Calcular anchos de valores (mismo para ambos lados para simetría)
         ancho_etiqueta_izq = ancho_izq * 0.35
         ancho_valor_izq = ancho_izq * 0.65
         ancho_etiqueta_der = ancho_der * 0.35
         ancho_valor_der = ancho_der * 0.65
         
-        # Calcular altura necesaria para ambos lados con la misma fuente
         self.set_font('Helvetica', '', 10)
         altura_cliente = self._calcular_altura_texto(nombre_cliente, ancho_valor_izq)
         altura_comprador = self._calcular_altura_texto(comprador_text, ancho_valor_der)
-        altura_total = max(altura_cliente, altura_comprador, 8)  # Ambas tendrán la misma altura
+        altura_total = max(altura_cliente, altura_comprador, 8)
         
-        # LADO IZQUIERDO - Cliente (usar altura total calculada)
         self.set_xy(x_inicio, y_inicio)
         self._crear_celda_con_altura_fija('NOMBRE / RAZÓN SOCIAL', ancho_etiqueta_izq, altura_total, es_etiqueta=True)
         self._crear_celda_con_altura_fija(nombre_cliente, ancho_valor_izq, altura_total, es_etiqueta=False)
         
-        # LADO DERECHO - Comprador (usar la MISMA altura total)
         x_derecha = x_inicio + ancho_izq + 5
         self.set_xy(x_derecha, y_inicio)
         self._crear_celda_con_altura_fija('COMPRADOR', ancho_etiqueta_der, altura_total, es_etiqueta=True)
         self._crear_celda_con_altura_fija(comprador_text, ancho_valor_der, altura_total, es_etiqueta=False)
         
-        # Posicionar para la siguiente fila
         self.set_xy(x_inicio, y_inicio + altura_total + 2)
     
     def _agregar_fila_cedulas_mejorada(self, datos_cliente: pd.DataFrame, ancho_izq: float, ancho_der: float):
@@ -251,69 +440,91 @@ class ReporteCliente(FPDF):
         y_inicio = self.get_y()
         x_inicio = self.get_x()
         
-        # Datos a mostrar
         cedula_cliente = str(datos_cliente.iloc[0]['CEDULA'])
         nit_empresa = ConfiguracionReporte.EMPRESA_NIT
         
-        # Calcular anchos (simétricos)
         ancho_etiqueta_izq = ancho_izq * 0.35
         ancho_valor_izq = ancho_izq * 0.65
         ancho_etiqueta_der = ancho_der * 0.35
         ancho_valor_der = ancho_der * 0.65
         
-        # Calcular altura necesaria para ambos lados
         self.set_font('Helvetica', '', 10)
         altura_cedula = self._calcular_altura_texto(cedula_cliente, ancho_valor_izq)
         altura_nit = self._calcular_altura_texto(nit_empresa, ancho_valor_der)
-        altura_total = max(altura_cedula, altura_nit, 8)  # Misma altura para ambos
+        altura_total = max(altura_cedula, altura_nit, 8)
         
-        # LADO IZQUIERDO - Cédula del cliente
         self.set_xy(x_inicio, y_inicio)
         self._crear_celda_con_altura_fija('CÉDULA / NIT', ancho_etiqueta_izq, altura_total, es_etiqueta=True)
         self._crear_celda_con_altura_fija(cedula_cliente, ancho_valor_izq, altura_total, es_etiqueta=False)
         
-        # LADO DERECHO - NIT de la empresa
         x_derecha = x_inicio + ancho_izq + 5
         self.set_xy(x_derecha, y_inicio)
         self._crear_celda_con_altura_fija('NIT EMPRESA', ancho_etiqueta_der, altura_total, es_etiqueta=True)
         self._crear_celda_con_altura_fija(nit_empresa, ancho_valor_der, altura_total, es_etiqueta=False)
         
-        # Posicionar para la siguiente fila
         self.set_xy(x_inicio, y_inicio + altura_total + 2)
     
-    def _agregar_fila_direcciones_mejorada(self, ancho_izq: float, ancho_der: float):
+    def _agregar_fila_direcciones_mejorada(self, ancho_izq: float, ancho_der: float, info_adicional: Dict[str, Any]):
         """Agrega la fila con direcciones con formato mejorado"""
         y_inicio = self.get_y()
         x_inicio = self.get_x()
         
-        # Direcciones
-        direccion_cliente = 'Vda cimarronas Km 1 Rionegro-Marinilla'
+        direccion_cliente = info_adicional.get('direccion', 'Vda cimarronas Km 1 Rionegro-Marinilla')
         direccion_empresa = ConfiguracionReporte.EMPRESA_DIRECCION
         
-        # Calcular anchos (simétricos)
         ancho_etiqueta_izq = ancho_izq * 0.35
         ancho_valor_izq = ancho_izq * 0.65
         ancho_etiqueta_der = ancho_der * 0.35
         ancho_valor_der = ancho_der * 0.65
         
-        # Calcular altura necesaria para ambos lados
         self.set_font('Helvetica', '', 10)
         altura_dir_cliente = self._calcular_altura_texto(direccion_cliente, ancho_valor_izq)
         altura_dir_empresa = self._calcular_altura_texto(direccion_empresa, ancho_valor_der)
-        altura_total = max(altura_dir_cliente, altura_dir_empresa, 8)  # Misma altura para ambos
+        altura_total = max(altura_dir_cliente, altura_dir_empresa, 8)
         
-        # LADO IZQUIERDO - Dirección del cliente
         self.set_xy(x_inicio, y_inicio)
         self._crear_celda_con_altura_fija('DIRECCIÓN', ancho_etiqueta_izq, altura_total, es_etiqueta=True)
         self._crear_celda_con_altura_fija(direccion_cliente, ancho_valor_izq, altura_total, es_etiqueta=False)
         
-        # LADO DERECHO - Dirección de la empresa
         x_derecha = x_inicio + ancho_izq + 5
         self.set_xy(x_derecha, y_inicio)
         self._crear_celda_con_altura_fija('DIRECCIÓN EMPRESA', ancho_etiqueta_der, altura_total, es_etiqueta=True)
         self._crear_celda_con_altura_fija(direccion_empresa, ancho_valor_der, altura_total, es_etiqueta=False)
         
-        # Espaciado final
+        self.set_xy(x_inicio, y_inicio + altura_total + 2)
+    
+    def _agregar_fila_municipio_telefono(self, ancho_izq: float, ancho_der: float, info_adicional: Dict[str, Any]):
+        """Agrega la fila con municipio y Celular si están disponibles"""
+        y_inicio = self.get_y()
+        x_inicio = self.get_x()
+        
+        municipio = info_adicional.get('municipio', '')
+        telefono = info_adicional.get('telefono', '')
+        
+        if not municipio and not telefono:
+            return
+        
+        ancho_etiqueta_izq = ancho_izq * 0.35
+        ancho_valor_izq = ancho_izq * 0.65
+        ancho_etiqueta_der = ancho_der * 0.35
+        ancho_valor_der = ancho_der * 0.65
+        
+        self.set_font('Helvetica', '', 10)
+        altura_municipio = self._calcular_altura_texto(municipio, ancho_valor_izq) if municipio else 8
+        altura_telefono = self._calcular_altura_texto(telefono, ancho_valor_der) if telefono else 8
+        altura_total = max(altura_municipio, altura_telefono, 8)
+        
+        if municipio:
+            self.set_xy(x_inicio, y_inicio)
+            self._crear_celda_con_altura_fija('MUNICIPIO', ancho_etiqueta_izq, altura_total, es_etiqueta=True)
+            self._crear_celda_con_altura_fija(municipio, ancho_valor_izq, altura_total, es_etiqueta=False)
+        
+        if telefono:
+            x_derecha = x_inicio + ancho_izq + 5
+            self.set_xy(x_derecha, y_inicio)
+            self._crear_celda_con_altura_fija('CELULAR', ancho_etiqueta_der, altura_total, es_etiqueta=True)
+            self._crear_celda_con_altura_fija(telefono, ancho_valor_der, altura_total, es_etiqueta=False)
+        
         self.set_xy(x_inicio, y_inicio + altura_total + 6)
     
     def _calcular_altura_texto(self, texto: str, ancho_disponible: float) -> float:
@@ -329,88 +540,47 @@ class ReporteCliente(FPDF):
             return num_lineas * ConfiguracionReporte.ALTURA_LINEA
     
     def _crear_celda_con_altura_fija(self, texto: str, ancho: float, altura_fija: float, es_etiqueta: bool = False):
-        """
-        Crea una celda con altura fija específica, centrado verticalmente el contenido
-        
-        Args:
-            texto: Texto a mostrar
-            ancho: Ancho de la celda
-            altura_fija: Altura fija que debe tener la celda (ya calculada)
-            es_etiqueta: Si es True, aplica formato de etiqueta, sino de valor
-        """
+        """Crea una celda con altura fija específica, centrado verticalmente el contenido"""
         x_actual = self.get_x()
         y_actual = self.get_y()
         
-        # Configurar formato según el tipo
         if es_etiqueta:
             self.set_font('Helvetica', 'B', 10)
             self.set_fill_color(*ConfiguracionReporte.COLOR_ENCABEZADO)
             alineacion = 'C'
         else:
             self.set_font('Helvetica', '', 10)
-            self.set_fill_color(255, 255, 255)  # Fondo blanco
+            self.set_fill_color(255, 255, 255)
             alineacion = 'L'
         
-        # Dibujar el rectángulo de fondo con la altura fija
         self.rect(x_actual, y_actual, ancho, altura_fija, 'DF')
-        
-        # Dibujar el borde
         self.rect(x_actual, y_actual, ancho, altura_fija, 'D')
         
-        # Calcular cuántas líneas necesita realmente el texto
         ancho_texto = self.get_string_width(texto)
         if ancho_texto <= ancho:
-            # Texto cabe en una línea - centrar verticalmente
             y_texto = y_actual + (altura_fija - ConfiguracionReporte.ALTURA_LINEA) / 2
             self.set_xy(x_actual, y_texto)
             self.cell(ancho, ConfiguracionReporte.ALTURA_LINEA, texto, border=0, align=alineacion)
         else:
-            # Texto necesita múltiples líneas
             num_lineas_necesarias = math.ceil(ancho_texto / ancho)
             altura_texto_total = num_lineas_necesarias * ConfiguracionReporte.ALTURA_LINEA
             
-            # Centrar verticalmente el bloque de texto
             y_texto = y_actual + (altura_fija - altura_texto_total) / 2
             self.set_xy(x_actual, y_texto)
             
-            # Usar multi_cell para el texto
             self.multi_cell(
                 ancho, ConfiguracionReporte.ALTURA_LINEA, texto,
                 border=0, align=alineacion,
                 new_x=XPos.RIGHT, new_y=YPos.TOP
             )
         
-        # Posicionar para la siguiente celda (a la derecha)
         self.set_xy(x_actual + ancho, y_actual)
-    
-    def _crear_celda_etiqueta(self, texto: str, ancho: float, altura: float):
-        """Crea una celda con formato de etiqueta"""
-        self.set_font('Helvetica', 'B', 11)
-        self.cell(
-            ancho, altura, texto,
-            border=1, 
-            new_x=XPos.RIGHT, 
-            new_y=YPos.TOP, 
-            fill=True
-        )
-    
-    def _crear_celda_valor(self, texto: str, ancho: float, altura: float, nueva_linea: bool = False):
-        """Crea una celda con formato de valor"""
-        self.set_font('Helvetica', '', 11)
-        new_x = XPos.LMARGIN if nueva_linea else XPos.RIGHT
-        new_y = YPos.NEXT if nueva_linea else YPos.TOP
-        self.cell(
-            ancho, altura, texto,
-            border=1, 
-            new_x=new_x, 
-            new_y=new_y
-        )
     
     def _agregar_titulo_detalle(self):
         """Agrega el título de la sección de detalle"""
         self.set_font('Helvetica', 'B', 14)
         self.cell(
-            0, 10, "DETALLE DE COMPRA",
+            0, 10, "",
             align="C", 
             new_x=XPos.LMARGIN, 
             new_y=YPos.NEXT
@@ -418,15 +588,7 @@ class ReporteCliente(FPDF):
         self.ln(2)
     
     def obtener_textos_fila(self, fila: pd.Series) -> List[str]:
-        """
-        Convierte una fila de datos en textos formateados para la tabla
-        
-        Args:
-            fila: Serie de pandas con los datos de la fila
-            
-        Returns:
-            Lista de strings formateados para cada columna
-        """
+        """Convierte una fila de datos en textos formateados para la tabla"""
         fecha_formateada = UtilFormato.formatear_fecha(fila.get('FCHA INGRESO', ''))
         porcentaje_exp = UtilFormato.formatear_porcentaje(
             fila.get('KG. EXP', 0), 
@@ -444,24 +606,20 @@ class ReporteCliente(FPDF):
             UtilFormato.formatear_moneda(fila.get('PRECIO EXP', 0)),
             UtilFormato.formatear_moneda(fila.get('PRECIO NAL', 0)),
             UtilFormato.formatear_moneda(fila.get('PRECIO AVE', 0)),
-            UtilFormato.formatear_moneda(fila.get('VALOR BRUTO', 0)),
-            UtilFormato.formatear_moneda(fila.get('RETENCIÓN FUENTE', 0)),
-            UtilFormato.formatear_moneda(fila.get('RETENCIÓN FONDO', 0)),
+            UtilFormato.formatear_moneda(fila.get('TOTAL BRUTO', 0)),
+            UtilFormato.formatear_moneda(fila.get('RETE FUENTE', 0)),
+            UtilFormato.formatear_moneda(fila.get('FONDO HORTIFRU', 0)),
             UtilFormato.formatear_moneda(fila.get('VALOR TOTAL', 0)),
         ]
     
     def agregar_tabla_detalle(self, datos: pd.DataFrame):
-        """
-        Agrega la tabla con el detalle de compras
-        
-        Args:
-            datos: DataFrame con los datos a mostrar en la tabla
-        """
+        """Agrega la tabla con el detalle de compras"""
         self._configurar_tabla()
         anchos_columnas = self._calcular_anchos_columnas()
         
         self._agregar_encabezados_tabla(anchos_columnas)
         self._agregar_filas_tabla(datos, anchos_columnas)
+        
     
     def _configurar_tabla(self):
         """Configura los colores y fuente para la tabla"""
@@ -511,38 +669,83 @@ class ReporteCliente(FPDF):
         for _, fila in datos.iterrows():
             self._agregar_fila_individual(fila, anchos_columnas, alternar_color)
             alternar_color = not alternar_color
+         # 💡 MODIFICACIÓN: Agregar la fila de totales aquí, al final de la tabla de detalles.
+        self._agregar_fila_total(datos, anchos_columnas)
+        
+    def _agregar_fila_total(self, datos: pd.DataFrame, anchos_columnas: List[float]):
+        """
+        Agrega una fila con el total de la columna 'VALOR BRUTO' al final de la tabla.
+        """
+        # Sumar la columna 'TOTAL BRUTO' para obtener el total.
+        total_bruto = datos['TOTAL BRUTO'].sum()
+
+        # Preparar el contenido de la fila de totales
+        # Creamos una lista vacía con el mismo número de columnas
+        textos_celda = [''] * len(ConfiguracionReporte.ENCABEZADOS_TABLA)
+        
+        # Encontramos la posición de la columna 'VALOR BRUTO'
+        try:
+            indice_columna_total_bruto = ConfiguracionReporte.ENCABEZADOS_TABLA.index("VALOR\nBRUTO")
+        except ValueError:
+            print("Error: La columna 'VALOR BRUTO' no se encontró en la configuración.")
+            return
+
+        # Creamos un texto para la celda a la izquierda del total
+        # Concatenamos las celdas vacías hasta la de 'VALOR BRUTO' para la etiqueta
+        etiqueta_total = "TOTAL"
+        
+        # Insertamos el texto formateado en la posición correcta
+        textos_celda[indice_columna_total_bruto] = UtilFormato.formatear_moneda(total_bruto)
+        
+        # Establecer la posición y el estilo para la fila de totales
+        self.set_font('Helvetica', 'B', 8)
+        self.set_fill_color(230, 230, 230)
+        
+        # Dibujar la fila completa con celdas vacías para los espacios en blanco
+        y_inicio = self.get_y()
+        x_inicio = self.get_x()
+        
+        # Dibujar la celda de la etiqueta "TOTAL"
+        ancho_etiqueta = sum(anchos_columnas[:indice_columna_total_bruto])
+        self.set_xy(x_inicio, y_inicio)
+        self.cell(ancho_etiqueta, ConfiguracionReporte.ALTURA_LINEA * 2, etiqueta_total, border=1, align='L', fill=True)
+
+        # Dibujar la celda del valor total
+        self.set_xy(x_inicio + ancho_etiqueta, y_inicio)
+        self.cell(anchos_columnas[indice_columna_total_bruto], ConfiguracionReporte.ALTURA_LINEA * 2, textos_celda[indice_columna_total_bruto], border=1, align='R', fill=True)
+        
+        # Dibuja el resto de celdas vacías a la derecha si es necesario
+        for i in range(indice_columna_total_bruto + 1, len(anchos_columnas)):
+            self.set_xy(x_inicio + sum(anchos_columnas[:i]), y_inicio)
+            self.cell(anchos_columnas[i], ConfiguracionReporte.ALTURA_LINEA * 2, '', border=1, align='R', fill=True)
+
+        self.ln(ConfiguracionReporte.ALTURA_LINEA * 2)
     
     def _agregar_fila_individual(self, fila: pd.Series, anchos_columnas: List[float], usar_color_alternativo: bool):
         """Agrega una fila individual a la tabla"""
         y_inicio = self.get_y()
         x_inicio = self.get_x()
         
-        # Calcular altura necesaria para la fila
         textos_celda = self.obtener_textos_fila(fila)
         altura_fila = self._calcular_altura_fila(textos_celda, anchos_columnas)
         
-        # Verificar salto de página
         if self.get_y() + altura_fila > self.page_break_trigger:
             self.add_page()
             self._agregar_encabezados_tabla(anchos_columnas)
             y_inicio = self.get_y()
             x_inicio = self.get_x()
         
-        # Configurar color de fondo
         color_fondo = (
             ConfiguracionReporte.COLOR_FILA_PAR if usar_color_alternativo 
             else ConfiguracionReporte.COLOR_FILA_IMPAR
         )
         self.set_fill_color(*color_fondo)
         
-        # Dibujar fondo de la fila
         ancho_total = sum(anchos_columnas)
         self.rect(x_inicio, y_inicio, ancho_total, altura_fila, 'DF')
         
-        # Agregar contenido de las celdas
         self._agregar_contenido_celdas(textos_celda, anchos_columnas, x_inicio, y_inicio, altura_fila)
         
-        # Posicionar para la siguiente fila
         self.set_xy(x_inicio, y_inicio + altura_fila)
     
     def _calcular_altura_fila(self, textos: List[str], anchos: List[float]) -> float:
@@ -565,7 +768,6 @@ class ReporteCliente(FPDF):
         for i, texto in enumerate(textos):
             x_celda = x_inicio + sum(anchos[:i])
             
-            # Calcular posición vertical centrada
             ancho_texto = self.get_string_width(texto)
             altura_texto = ConfiguracionReporte.ALTURA_LINEA
             if ancho_texto > anchos[i]:
@@ -573,7 +775,6 @@ class ReporteCliente(FPDF):
             
             y_texto = y_inicio + (altura_fila - altura_texto) / 2
             
-            # Posicionar y agregar texto
             self.set_xy(x_celda, y_texto)
             self.multi_cell(
                 anchos[i], ConfiguracionReporte.ALTURA_LINEA, texto,
@@ -581,40 +782,81 @@ class ReporteCliente(FPDF):
                 new_x=XPos.RIGHT, new_y=YPos.TOP
             )
     
-    def agregar_tabla_resumen(self, datos: pd.DataFrame):
+    def agregar_tabla_resumen_y_cert(self, datos: pd.DataFrame):
         """
-        Agrega la tabla de resumen con totales
+        Agrega la tabla de resumen con totales y las certificaciones al lado,
+        asegurando que el margen solo afecte a las certificaciones.
+        """
         
-        Args:
-            datos: DataFrame con los datos para calcular el resumen
-        """
-        self.ln(4)
+        self.ln(6)
         self.set_font('Helvetica', 'B', 9)
         
-        # Calcular valores del resumen
         valores_resumen = self._calcular_valores_resumen(datos)
         
-        # Configurar posición de la tabla
         ancho_celda = 45
         altura_celda = 8
-        x_posicion = self.w - self.r_margin - ancho_celda * 2
+        x_posicion_tabla = self.w - self.r_margin - ancho_celda * 2
         
-        # Agregar filas del resumen
-        self._agregar_filas_resumen(valores_resumen, x_posicion, ancho_celda, altura_celda)
-    
+        y_inicio = self.get_y() # <-- Obtener la posición 'y' inicial
+        
+        # 1. Dibujar las certificaciones con un margen superior
+        self._dibujar_certificacion(y_inicio, x_posicion_tabla)
+        
+        # 2. Dibujar la tabla de resumen, restaurando la posición 'y' original
+        self.set_xy(x_posicion_tabla, y_inicio) # <-- Posicionar el cursor en la 'y' original, pero en la nueva 'x'
+        self._agregar_filas_resumen(valores_resumen, x_posicion_tabla, ancho_celda, altura_celda)
+
+    def _dibujar_certificacion(self, y_inicio: float, x_limite_derecho: float):
+        """
+        Agrega los recuadros de certificación al lado izquierdo de la tabla de resumen.
+        """
+        if self.certificacion_flo or self.certificacion_gap:
+            ancho_disponible = x_limite_derecho - self.l_margin - 5
+            ancho_cert = 50
+            altura_cert = 10
+            
+            self.set_font('Helvetica', 'B', 10)
+
+            # 💡 MODIFICACIÓN: Definir el margen aquí, no es necesario pasarlo
+            margin_top = 8 
+            
+            y_posicion_cert = y_inicio + margin_top # <-- Aplicar el margen solo a la posición 'y' de las certificaciones
+            
+            # Dibujar el recuadro de la certificación FLO si existe
+            if self.certificacion_flo and ancho_disponible >= ancho_cert:
+                self.set_xy(self.l_margin, y_posicion_cert)
+                self.set_fill_color(255, 255, 255)
+                self.multi_cell(
+                    ancho_cert, 5, self.certificacion_flo,
+                    border=0, align='C'
+                )
+
+            # Dibujar el recuadro de la certificación GLOBALG.A.P. si existe
+            if self.certificacion_gap and ancho_disponible >= ancho_cert:
+                x_pos_gap = self.l_margin + (ancho_cert + 5 if self.certificacion_flo else 0)
+                if x_pos_gap + ancho_cert <= ancho_disponible + self.l_margin:
+                    self.set_xy(x_pos_gap, y_posicion_cert) # <-- Usar la nueva posición 'y'
+                    self.set_fill_color(255, 255, 255)
+                    self.multi_cell(
+                        ancho_cert, 5, self.certificacion_gap,
+                        border=0, align='C'
+                    )
     def _calcular_valores_resumen(self, datos: pd.DataFrame) -> Dict[str, float]:
         """Calcula los valores para el resumen financiero"""
         return {
-            'subtotal': datos['TOTAL'].sum(),
-            'total_documento': datos['TOTAL T'].sum(),
+            'subtotal': datos['TOTAL BRUTO'].sum(),
             'descuento_2500': datos.get('D 2500', pd.Series([0])).sum(),
-            'descuento_plantas': datos.get('OTROS DESCUENTOS', pd.Series([0])).sum(),
-            'otros_descuentos': datos.get('DES ANALISIS', pd.Series([0])).sum()
+            'descuento_plantas': datos.get('DES ANALISIS', pd.Series([0])).sum(),
+            'otros_descuentos': 0,
+            'total_documento': datos['VALOR TOTAL'].sum()
         }
     
     def _agregar_filas_resumen(self, valores: Dict[str, float], x_pos: float, 
-                              ancho_celda: float, altura_celda: float):
-        """Agrega las filas de la tabla de resumen"""
+                               ancho_celda: float, altura_celda: float):
+        """Agrega una fila individual a la tabla de resumen"""
+        self.set_font('Helvetica', '', 9)
+        self.set_fill_color(255, 255, 255)
+    
         filas_resumen = [
             ("SUBTOTAL", valores['subtotal']),
             ("DESCUENTO 2500", valores['descuento_2500']),
@@ -622,133 +864,86 @@ class ReporteCliente(FPDF):
             ("OTROS DESCUENTOS", valores['otros_descuentos']),
         ]
         
-        # Filas regulares
         for etiqueta, valor in filas_resumen:
-            self._agregar_fila_resumen(etiqueta, valor, x_pos, ancho_celda, altura_celda)
+            self.set_xy(x_pos, self.get_y())
+            self.cell(ancho_celda, altura_celda, etiqueta, border=1, align='C', fill=True)
+            self.cell(ancho_celda, altura_celda, UtilFormato.formatear_moneda(valor), border=1, align='R', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         
-        # Fila de total (con formato especial)
-        self.ln(2)
         self.set_x(x_pos)
-        self.set_font('Helvetica', 'B', 10)
-        self._agregar_fila_resumen("TOTAL DOCUMENTO", valores['total_documento'], 
-                                  x_pos, ancho_celda, altura_celda, es_total=True)
-        self.ln(5)
-    
-    def _agregar_fila_resumen(self, etiqueta: str, valor: float, x_pos: float,
-                             ancho_celda: float, altura_celda: float, es_total: bool = False):
-        """Agrega una fila individual al resumen"""
-        if not es_total:
-            self.set_x(x_pos)
-        
-        self.cell(
-            ancho_celda, altura_celda, etiqueta,
-            border=1, align='L',
-            new_x=XPos.RIGHT, new_y=YPos.TOP
-        )
-        self.cell(
-            ancho_celda, altura_celda, UtilFormato.formatear_moneda(valor),
-            border=1, align='R',
-            new_x=XPos.LMARGIN, new_y=YPos.NEXT
-        )
-    
-    def generar_reportes(self, archivo_excel: str):
-        """
-        Genera reportes individuales para cada cliente desde un archivo Excel
-        
-        Args:
-            archivo_excel: Ruta al archivo Excel con los datos
-        """
-        try:
-            # Cargar datos desde Excel
-            df = self._cargar_datos_excel(archivo_excel)
-            
-            # Limpiar y procesar datos
-            df = self._limpiar_datos(df)
-            
-            # Generar reportes por cliente
-            self._generar_reportes_por_cliente(df)
-            
-            print("✅ Todos los reportes han sido generados exitosamente")
-            
-        except Exception as e:
-            print(f"❌ Error al generar reportes: {str(e)}")
-            raise
-    
-    def _cargar_datos_excel(self, archivo_excel: str) -> pd.DataFrame:
-        """Carga los datos desde el archivo Excel"""
-        try:
-            return pd.read_excel(archivo_excel, sheet_name='BD LIQUIDACION')
-        except FileNotFoundError:
-            raise FileNotFoundError(f"El archivo '{archivo_excel}' no se encontró.")
-        except ValueError:
-            raise ValueError(f"La hoja 'BD LIQUIDACION' no existe en '{archivo_excel}'.")
-    
-    def _limpiar_datos(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Limpia y prepara los datos para el procesamiento"""
-        df['NOMBRE'] = df['NOMBRE'].fillna('Sin Nombre')
-        df['CEDULA'] = df['CEDULA'].fillna('000000')
-        return df
-    
-    def _generar_reportes_por_cliente(self, df: pd.DataFrame):
-        """Genera un reporte individual para cada cliente"""
-        clientes = df.groupby(['NOMBRE', 'CEDULA'])
-        
-        total_clientes = len(clientes)
-        print(f"📊 Generando reportes para {total_clientes} clientes...")
-        
-        for i, ((nombre_cliente, cedula_cliente), datos_cliente) in enumerate(clientes, 1):
-            try:
-                # Generar nombre de archivo seguro
-                nombre_archivo = self._generar_nombre_archivo(nombre_cliente, cedula_cliente)
-                ruta_archivo = os.path.join(ConfiguracionReporte.DIRECTORIO_SALIDA, nombre_archivo)
-                
-                # Crear y configurar PDF
-                pdf = ReporteCliente()
-                pdf.add_page()
-                
-                # Agregar contenido
-                pdf.agregar_informacion_cliente(datos_cliente)
-                pdf.agregar_tabla_detalle(datos_cliente)
-                pdf.agregar_tabla_resumen(datos_cliente)
-                
-                # Guardar archivo
-                pdf.output(ruta_archivo)
-                
-                print(f"✓ [{i}/{total_clientes}] {nombre_cliente} - {nombre_archivo}")
-                
-            except Exception as e:
-                print(f"❌ Error generando reporte para {nombre_cliente}: {str(e)}")
-    
-    def _generar_nombre_archivo(self, nombre: str, cedula: str) -> str:
-        """Genera un nombre de archivo seguro para el PDF"""
-        # Limpiar caracteres especiales del nombre
-        nombre_limpio = "".join(c for c in nombre if c.isalnum() or c in (' ', '-', '_')).strip()
-        nombre_limpio = nombre_limpio.replace(' ', '_')
-        return f"{nombre_limpio}_{cedula}.pdf"
+        self.set_font('Helvetica', 'B', 12)
+        self.cell(ancho_celda, altura_celda, "TOTAL", border=1, align='C', fill=True)
+        self.set_font('Helvetica', 'B', 12)
+        self.cell(ancho_celda, altura_celda, UtilFormato.formatear_moneda(valores['total_documento']), border=1, align='R', fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
 
-def main():
-    """Función principal para ejecutar el generador de reportes"""
+def generar_reportes(archivo_excel: str):
+    """
+    Función principal para cargar datos y generar reportes PDF.
+    """
     try:
-        # Configuración
-        excel_path = './data/IMPRESION 2 JULIO.xlsx'
-        
-        print("🚀 Iniciando generación de reportes...")
-        print(f"📁 Archivo de entrada: {excel_path}")
-        print(f"📁 Directorio de salida: {ConfiguracionReporte.DIRECTORIO_SALIDA}")
-        
-        # Generar reportes
-        generador = ReporteCliente()
-        generador.generar_reportes(excel_path)
-        
-        print(f"\n✅ Proceso completado. Revise la carpeta '{ConfiguracionReporte.DIRECTORIO_SALIDA}' para ver los reportes generados.")
-        
-    except Exception as e:
-        print(f"\n❌ Error en la ejecución: {str(e)}")
-        return 1
-    
-    return 0
+        gestor_datos = GestorDatos(archivo_excel)
+        df_liquidacion = gestor_datos.cargar_datos()
 
+        if df_liquidacion.empty:
+            print("❌ El DataFrame de liquidación está vacío. No se pueden generar reportes.")
+            return
+
+        clientes = df_liquidacion.groupby('CEDULA')
+        total_clientes = len(clientes)
+        
+        for i, (cedula, datos_cliente) in enumerate(clientes, 1):
+            try:
+                nombre = datos_cliente['NOMBRE'].iloc[0]
+                
+                # Obtener el tipo de certificación de la columna 'FL-GL' del DataFrame principal
+                cert_tipo_liquidacion = str(datos_cliente['FL-GL'].iloc[0]).upper().strip()
+                
+                info_adicional = gestor_datos.obtener_info_cliente(cedula)
+                
+                telefono = info_adicional.get('telefono','')
+                
+                email = info_adicional.get('email','')
+                
+                # Pasar el tipo de certificación a la función obtener_certificacion
+                certificaciones = gestor_datos.obtener_certificacion(cedula, cert_tipo_liquidacion)
+                
+                reporte = ReporteCliente()
+                reporte.add_page()
+                reporte.establecer_certificacion(certificaciones)
+                reporte.agregar_informacion_cliente(datos_cliente, info_adicional)
+                reporte.agregar_tabla_detalle(datos_cliente)
+                reporte.agregar_tabla_resumen_y_cert(datos_cliente)
+                    
+                if email and email not in ['no@no.com','2@2.com', '2@2.COM']: 
+                    nombre_pdf = f"{nombre}!{cedula}!{email}.pdf" 
+                    ruta_salida = os.path.join(reporte.DIRECTORIO_SALIDA_EMAIL, nombre_pdf)
+                    reporte.output(ruta_salida)
+                    
+                elif telefono: 
+                    telefono_limpio = "".join(filter(str.isdigit, telefono))
+                    nombre_pdf = f"{nombre}!{cedula}!{telefono_limpio}.pdf" 
+                    ruta_salida = os.path.join(reporte.DIRECTORIO_SALIDA_TEL, nombre_pdf)
+                    reporte.output(ruta_salida)
+                    
+                else:
+                    # Si no hay teléfono, usa solo el nombre y la cédula
+                    nombre_pdf = f"{nombre}!{cedula}.pdf"
+                    ruta_salida = os.path.join(reporte.DIRECTORIO_SALIDA, nombre_pdf)
+                    reporte.output(ruta_salida)
+                
+                print(f"✅ [{i}/{total_clientes}] Reporte generado para {nombre} (Cédula: {cedula}) - Certificación: {cert_tipo_liquidacion}")
+
+            except Exception as e:
+                print(f"❌ [{i}/{total_clientes}] Error generando reporte para {nombre} (Cédula: {cedula}): {repr(e)}")
+                
+        print("\n✅ Todos los reportes han sido generados exitosamente.")
+
+    except (FileNotFoundError, ValueError) as e:
+        print(f"❌ Error crítico: {e}")
 
 if __name__ == '__main__':
-    exit(main())
+    # Ruta de tu archivo Excel
+    ruta_archivo_excel = './data/IMPRESION 2 JULIO.xlsx' 
+    
+    generar_reportes(ruta_archivo_excel)
+  
