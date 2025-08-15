@@ -4,7 +4,7 @@ from emailSender import ReportEmailSender
 # Carpeta donde están los PDFs
 base_dir = os.path.dirname(os.path.abspath(__file__))
 proyecto_dir = os.path.dirname(base_dir)
-directorio_tel = os.path.join(proyecto_dir, "output", "prueba2")
+directorio_tel = os.path.join(proyecto_dir, "output", "prueba")
 
 email_archivos = []
 

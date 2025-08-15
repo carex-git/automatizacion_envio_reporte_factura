@@ -108,6 +108,7 @@ class GestorDatos:
         self.df_liquidacion = None
         self.df_bd_pro = None
         self.df_cer_fl_gl = None
+        self.df_tel_email = None  # NUEVA HOJA PARA TELÉFONOS
         
     def cargar_datos(self):
         """Carga todos los datos necesarios desde el archivo Excel"""
@@ -145,6 +146,18 @@ class GestorDatos:
             except ValueError:
                 print("⚠️ Advertencia: No se encontró la hoja 'CER FL GL'. Se usarán certificaciones por defecto.")
                 self.df_cer_fl_gl = pd.DataFrame()
+                
+            # Cargar hoja INFO PRO para TELEFONOS Y CORREOS
+            try:
+                self.df_tel_email = pd.read_excel(
+                    self.archivo_excel, 
+                    sheet_name='INFO PRO'
+                )
+                self.df_tel_email.columns = self.df_tel_email.columns.str.strip()
+                print("Columnas de 'INFO PRO':", self.df_tel_email.columns)
+            except ValueError:
+                print("⚠️ Advertencia: No se encontró la hoja 'INFO PRO'. Se usará dirección por defecto.")
+                self.df_bd_pro = pd.DataFrame()
             
             return self._limpiar_datos()
             
@@ -198,12 +211,19 @@ class GestorDatos:
                 
                 if 'Ciudad' in cliente_info.columns and pd.notna(fila['Ciudad']):
                     info['municipio'] = str(fila['Ciudad'])
-                
-                if 'Celular' in cliente_info.columns and fila['Celular'] !='0' and fila['Celular'] !=0  and pd.notna(fila['Celular']) :
-                    info['telefono'] = str(fila['Celular'])
                     
                 if 'Email' in cliente_info.columns and pd.notna(fila['Email']):
                     info['email'] = str(fila['Email'])
+                    
+        if not self.df_tel_email.empty and cedula:
+            telefono_info = self.df_tel_email[
+                self.df_tel_email['CEDULA'].astype(str) == str(cedula)
+            ]
+            
+            if not telefono_info.empty:
+                fila_tel = telefono_info.iloc[0]
+                if 'CELULAR 1' in telefono_info.columns and pd.notna(fila_tel['CELULAR 1'] and fila_tel['CELULAR 1'] != '0' and fila_tel['CELULAR 1'] != 0):
+                    info['telefono'] = str(fila_tel['CELULAR 1'])
         
         return info
     
@@ -587,14 +607,21 @@ class ReporteCliente(FPDF):
         )
         self.ln(2)
     
+    # 1. MODIFICAR la función obtener_textos_fila
     def obtener_textos_fila(self, fila: pd.Series) -> List[str]:
         """Convierte una fila de datos en textos formateados para la tabla"""
         fecha_formateada = UtilFormato.formatear_fecha(fila.get('FCHA INGRESO', ''))
         porcentaje_exp = UtilFormato.formatear_porcentaje(
-            fila.get('KG. EXP', 0), 
+            fila.get('KG. EXP', 0),
             fila.get('KILOS RECIBIDOS', 1)
         )
         
+        # CALCULAR EL VALOR TOTAL: TOTAL BRUTO - RETE FUENTE - FONDO HORTIFRU
+        total_bruto = fila.get('TOTAL BRUTO', 0)
+        rete_fuente = fila.get('RETE FUENTE', 0)
+        fondo_hortifru = fila.get('FONDO HORTIFRU', 0)
+        valor_total_calculado = total_bruto - rete_fuente - fondo_hortifru
+    
         return [
             str(fila.get('FRUTA', '')),
             fecha_formateada,
@@ -609,7 +636,7 @@ class ReporteCliente(FPDF):
             UtilFormato.formatear_moneda(fila.get('TOTAL BRUTO', 0)),
             UtilFormato.formatear_moneda(fila.get('RETE FUENTE', 0)),
             UtilFormato.formatear_moneda(fila.get('FONDO HORTIFRU', 0)),
-            UtilFormato.formatear_moneda(fila.get('VALOR TOTAL', 0)),
+            UtilFormato.formatear_moneda(valor_total_calculado),  # VALOR CALCULADO
         ]
     
     def agregar_tabla_detalle(self, datos: pd.DataFrame):
@@ -672,52 +699,63 @@ class ReporteCliente(FPDF):
          # 💡 MODIFICACIÓN: Agregar la fila de totales aquí, al final de la tabla de detalles.
         self._agregar_fila_total(datos, anchos_columnas)
         
+    
+    # 2. MODIFICAR la función _agregar_fila_total
     def _agregar_fila_total(self, datos: pd.DataFrame, anchos_columnas: List[float]):
         """
-        Agrega una fila con el total de la columna 'VALOR BRUTO' al final de la tabla.
+        Agrega una fila con los totales de las columnas calculando el VALOR TOTAL.
         """
-        # Sumar la columna 'TOTAL BRUTO' para obtener el total.
+        # Sumar las columnas necesarias para obtener los totales.
         total_bruto = datos['TOTAL BRUTO'].sum()
+        total_rete_fuente = datos['RETE FUENTE'].sum()
+        total_fondo_hortifru = datos['FONDO HORTIFRU'].sum()
+        
+        # CALCULAR EL TOTAL DEL VALOR TOTAL: TOTAL BRUTO - RETENCIONES
+        total_valor_total = total_bruto - total_rete_fuente - total_fondo_hortifru
 
         # Preparar el contenido de la fila de totales
-        # Creamos una lista vacía con el mismo número de columnas
         textos_celda = [''] * len(ConfiguracionReporte.ENCABEZADOS_TABLA)
-        
-        # Encontramos la posición de la columna 'VALOR BRUTO'
+    
+        # Encontramos las posiciones de las columnas necesarias
         try:
-            indice_columna_total_bruto = ConfiguracionReporte.ENCABEZADOS_TABLA.index("VALOR\nBRUTO")
-        except ValueError:
-            print("Error: La columna 'VALOR BRUTO' no se encontró en la configuración.")
+            indice_total_bruto = ConfiguracionReporte.ENCABEZADOS_TABLA.index("VALOR\nBRUTO")
+            indice_rete_fuente = ConfiguracionReporte.ENCABEZADOS_TABLA.index("RETENCIÓN\nFUENTE")
+            indice_fondo_hortifru = ConfiguracionReporte.ENCABEZADOS_TABLA.index("RETENCIÓN\nFONDO")
+            indice_valor_total = ConfiguracionReporte.ENCABEZADOS_TABLA.index("VALOR\nTOTAL")
+        except ValueError as e:
+            print(f"Error: Una de las columnas no se encontró en la configuración: {e}")
             return
 
-        # Creamos un texto para la celda a la izquierda del total
-        # Concatenamos las celdas vacías hasta la de 'VALOR BRUTO' para la etiqueta
-        etiqueta_total = "TOTAL"
-        
-        # Insertamos el texto formateado en la posición correcta
-        textos_celda[indice_columna_total_bruto] = UtilFormato.formatear_moneda(total_bruto)
-        
+        # Insertamos los textos formateados en las posiciones correctas
+        textos_celda[indice_total_bruto] = UtilFormato.formatear_moneda(total_bruto)
+        textos_celda[indice_rete_fuente] = UtilFormato.formatear_moneda(total_rete_fuente)
+        textos_celda[indice_fondo_hortifru] = UtilFormato.formatear_moneda(total_fondo_hortifru)
+        textos_celda[indice_valor_total] = UtilFormato.formatear_moneda(total_valor_total)  # VALOR CALCULADO
+
         # Establecer la posición y el estilo para la fila de totales
         self.set_font('Helvetica', 'B', 8)
         self.set_fill_color(230, 230, 230)
-        
-        # Dibujar la fila completa con celdas vacías para los espacios en blanco
+    
+        # Dibujar la fila completa
         y_inicio = self.get_y()
         x_inicio = self.get_x()
-        
+    
+        # Encontrar la primera columna que tiene total (la más a la izquierda)
+        columnas_con_total = [indice_total_bruto, indice_rete_fuente, indice_fondo_hortifru, indice_valor_total]
+        primera_columna_con_total = min(columnas_con_total)
+    
         # Dibujar la celda de la etiqueta "TOTAL"
-        ancho_etiqueta = sum(anchos_columnas[:indice_columna_total_bruto])
+        ancho_etiqueta = sum(anchos_columnas[:primera_columna_con_total])
         self.set_xy(x_inicio, y_inicio)
-        self.cell(ancho_etiqueta, ConfiguracionReporte.ALTURA_LINEA * 2, etiqueta_total, border=1, align='L', fill=True)
+        self.cell(ancho_etiqueta, ConfiguracionReporte.ALTURA_LINEA * 2, "TOTAL", border=1, align='L', fill=True)
 
-        # Dibujar la celda del valor total
-        self.set_xy(x_inicio + ancho_etiqueta, y_inicio)
-        self.cell(anchos_columnas[indice_columna_total_bruto], ConfiguracionReporte.ALTURA_LINEA * 2, textos_celda[indice_columna_total_bruto], border=1, align='R', fill=True)
-        
-        # Dibuja el resto de celdas vacías a la derecha si es necesario
-        for i in range(indice_columna_total_bruto + 1, len(anchos_columnas)):
-            self.set_xy(x_inicio + sum(anchos_columnas[:i]), y_inicio)
-            self.cell(anchos_columnas[i], ConfiguracionReporte.ALTURA_LINEA * 2, '', border=1, align='R', fill=True)
+        # Dibujar cada celda con su total correspondiente
+        for i in range(len(anchos_columnas)):
+            if i >= primera_columna_con_total:
+                x_celda = x_inicio + sum(anchos_columnas[:i])
+                self.set_xy(x_celda, y_inicio)
+                texto_celda = textos_celda[i] if textos_celda[i] else ''
+                self.cell(anchos_columnas[i], ConfiguracionReporte.ALTURA_LINEA * 2, texto_celda, border=1, align='R', fill=True)
 
         self.ln(ConfiguracionReporte.ALTURA_LINEA * 2)
     
@@ -843,14 +881,23 @@ class ReporteCliente(FPDF):
                     )
     def _calcular_valores_resumen(self, datos: pd.DataFrame) -> Dict[str, float]:
         """Calcula los valores para el resumen financiero"""
+        # CALCULAR EL VALOR TOTAL: TOTAL BRUTO - RETENCIONES
+        total_bruto = datos['TOTAL BRUTO'].sum()
+        total_rete_fuente = datos['RETE FUENTE'].sum()
+        total_fondo_hortifru = datos['FONDO HORTIFRU'].sum()
+        
+        # EL SUBTOTAL ES LA SUMA DE TODOS LOS VALORES TOTALES CALCULADOS
+        subtotal_calculado = total_bruto - total_rete_fuente - total_fondo_hortifru
+        
         return {
-            'subtotal': datos['TOTAL BRUTO'].sum(),
+            'subtotal': subtotal_calculado,
             'descuento_2500': datos.get('D 2500', pd.Series([0])).sum(),
-            'descuento_plantas': datos.get('DES ANALISIS', pd.Series([0])).sum(),
-            'otros_descuentos': 0,
-            'total_documento': datos['VALOR TOTAL'].sum()
+            'descuento_plantas': 0,
+            'otros_descuentos': datos.get('DES ANALISIS', pd.Series([0])).sum(),
+            'total_documento': subtotal_calculado -
+            datos.get('D 2500', pd.Series([0])).sum()- datos.get('DES ANALISIS', pd.Series([0])).sum() #0 es organizar descuento plantas
         }
-    
+        
     def _agregar_filas_resumen(self, valores: Dict[str, float], x_pos: float, 
                                ancho_celda: float, altura_celda: float):
         """Agrega una fila individual a la tabla de resumen"""
@@ -860,8 +907,8 @@ class ReporteCliente(FPDF):
         filas_resumen = [
             ("SUBTOTAL", valores['subtotal']),
             ("DESCUENTO 2500", valores['descuento_2500']),
-            ("DESCUENTO PLANTAS", valores['descuento_plantas']),
-            ("OTROS DESCUENTOS", valores['otros_descuentos']),
+            ("DESCUENTO PLANTAS",valores['descuento_plantas']),
+            ("OTROS DESCUENTOS",valores['otros_descuentos']) 
         ]
         
         for etiqueta, valor in filas_resumen:
@@ -871,79 +918,77 @@ class ReporteCliente(FPDF):
         
         self.set_x(x_pos)
         self.set_font('Helvetica', 'B', 12)
-        self.cell(ancho_celda, altura_celda, "TOTAL", border=1, align='C', fill=True)
+        self.cell(ancho_celda, altura_celda, "TOTAL A PAGAR", border=1, align='C', fill=True)
         self.set_font('Helvetica', 'B', 12)
         self.cell(ancho_celda, altura_celda, UtilFormato.formatear_moneda(valores['total_documento']), border=1, align='R', fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
 
-def generar_reportes(archivo_excel: str):
-    """
-    Función principal para cargar datos y generar reportes PDF.
-    """
-    try:
-        gestor_datos = GestorDatos(archivo_excel)
-        df_liquidacion = gestor_datos.cargar_datos()
+    def generar_reportes(self,archivo_excel: str):
+        """
+        Función principal para cargar datos y generar reportes PDF.
+        """
+        try:
+            gestor_datos = GestorDatos(archivo_excel)
+            df_liquidacion = gestor_datos.cargar_datos()
 
-        if df_liquidacion.empty:
-            print("❌ El DataFrame de liquidación está vacío. No se pueden generar reportes.")
-            return
+            if df_liquidacion.empty:
+                print("❌ El DataFrame de liquidación está vacío. No se pueden generar reportes.")
+                return
 
-        clientes = df_liquidacion.groupby('CEDULA')
-        total_clientes = len(clientes)
-        
-        for i, (cedula, datos_cliente) in enumerate(clientes, 1):
-            try:
-                nombre = datos_cliente['NOMBRE'].iloc[0]
-                
-                # Obtener el tipo de certificación de la columna 'FL-GL' del DataFrame principal
-                cert_tipo_liquidacion = str(datos_cliente['FL-GL'].iloc[0]).upper().strip()
-                
-                info_adicional = gestor_datos.obtener_info_cliente(cedula)
-                
-                telefono = info_adicional.get('telefono','')
-                
-                email = info_adicional.get('email','')
-                
-                # Pasar el tipo de certificación a la función obtener_certificacion
-                certificaciones = gestor_datos.obtener_certificacion(cedula, cert_tipo_liquidacion)
-                
-                reporte = ReporteCliente()
-                reporte.add_page()
-                reporte.establecer_certificacion(certificaciones)
-                reporte.agregar_informacion_cliente(datos_cliente, info_adicional)
-                reporte.agregar_tabla_detalle(datos_cliente)
-                reporte.agregar_tabla_resumen_y_cert(datos_cliente)
+            clientes = df_liquidacion.groupby('CEDULA')
+            total_clientes = len(clientes)
+            
+            for i, (cedula, datos_cliente) in enumerate(clientes, 1):
+                try:
+                    nombre = datos_cliente['NOMBRE'].iloc[0]
                     
-                if email and email not in ['no@no.com','2@2.com', '2@2.COM']: 
-                    nombre_pdf = f"{nombre}!{cedula}!{email}.pdf" 
-                    ruta_salida = os.path.join(reporte.DIRECTORIO_SALIDA_EMAIL, nombre_pdf)
-                    reporte.output(ruta_salida)
+                    # Obtener el tipo de certificación de la columna 'FL-GL' del DataFrame principal
+                    cert_tipo_liquidacion = str(datos_cliente['FL-GL'].iloc[0]).upper().strip()
                     
-                elif telefono: 
-                    telefono_limpio = "".join(filter(str.isdigit, telefono))
-                    nombre_pdf = f"{nombre}!{cedula}!{telefono_limpio}.pdf" 
-                    ruta_salida = os.path.join(reporte.DIRECTORIO_SALIDA_TEL, nombre_pdf)
-                    reporte.output(ruta_salida)
+                    info_adicional = gestor_datos.obtener_info_cliente(cedula)
                     
-                else:
-                    # Si no hay teléfono, usa solo el nombre y la cédula
-                    nombre_pdf = f"{nombre}!{cedula}.pdf"
-                    ruta_salida = os.path.join(reporte.DIRECTORIO_SALIDA, nombre_pdf)
-                    reporte.output(ruta_salida)
-                
-                print(f"✅ [{i}/{total_clientes}] Reporte generado para {nombre} (Cédula: {cedula}) - Certificación: {cert_tipo_liquidacion}")
+                    telefono = info_adicional.get('telefono','')
+                    
+                    email = info_adicional.get('email','')
+                    
+                    # Pasar el tipo de certificación a la función obtener_certificacion
+                    certificaciones = gestor_datos.obtener_certificacion(cedula, cert_tipo_liquidacion)
+                    
+                    reporte = ReporteCliente()
+                    reporte.add_page()
+                    reporte.establecer_certificacion(certificaciones)
+                    reporte.agregar_informacion_cliente(datos_cliente, info_adicional)
+                    reporte.agregar_tabla_detalle(datos_cliente)
+                    reporte.agregar_tabla_resumen_y_cert(datos_cliente)
+                            
+                    if telefono: 
+                        telefono_limpio = "".join(filter(str.isdigit, telefono))
+                        nombre_pdf = f"{nombre}!{cedula}!{telefono_limpio}.pdf" 
+                        ruta_salida = os.path.join(reporte.DIRECTORIO_SALIDA_TEL, nombre_pdf)
+                        reporte.output(ruta_salida)
+                        
+                    elif email and email not in ['no@no.com','2@2.com', '2@2.COM']: 
+                        nombre_pdf = f"{nombre}!{cedula}!{email}.pdf" 
+                        ruta_salida = os.path.join(reporte.DIRECTORIO_SALIDA_EMAIL, nombre_pdf)
+                        reporte.output(ruta_salida)
+                        
+                    else:
+                        # Si no hay teléfono, usa solo el nombre y la cédula
+                        nombre_pdf = f"{nombre}!{cedula}.pdf"
+                        ruta_salida = os.path.join(reporte.DIRECTORIO_SALIDA, nombre_pdf)
+                        reporte.output(ruta_salida)
+                    
+                    print(f"✅ [{i}/{total_clientes}] Reporte generado para {nombre} (Cédula: {cedula}) - Certificación: {cert_tipo_liquidacion}")
 
-            except Exception as e:
-                print(f"❌ [{i}/{total_clientes}] Error generando reporte para {nombre} (Cédula: {cedula}): {repr(e)}")
-                
-        print("\n✅ Todos los reportes han sido generados exitosamente.")
+                except Exception as e:
+                    print(f"❌ [{i}/{total_clientes}] Error generando reporte para {nombre} (Cédula: {cedula}): {repr(e)}")
+                    
+            print("\n✅ Todos los reportes han sido generados exitosamente.")
 
-    except (FileNotFoundError, ValueError) as e:
-        print(f"❌ Error crítico: {e}")
-
+        except (FileNotFoundError, ValueError) as e:
+            print(f"❌ Error crítico: {e}")
 if __name__ == '__main__':
     # Ruta de tu archivo Excel
     ruta_archivo_excel = './data/IMPRESION 2 JULIO.xlsx' 
     
-    generar_reportes(ruta_archivo_excel)
-  
+    ReporteCliente().generar_reportes(ruta_archivo_excel)

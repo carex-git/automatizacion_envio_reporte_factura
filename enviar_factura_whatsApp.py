@@ -1,0 +1,75 @@
+import os
+import sys
+import pandas as pd
+import json
+from WhatsAppSender import WhatsAppSender
+from data_read import ReporteCliente
+
+# Cargar configuración
+with open("config.json", "r", encoding="utf-8") as f:
+    config = json.load(f)
+
+def resource_path(relative_path):
+    """Obtiene la ruta absoluta, compatible con PyInstaller"""
+    try:
+        base_path = sys._MEIPASS  # cuando es .exe
+    except AttributeError:
+        base_path = os.path.abspath(".")  # cuando es script
+    return os.path.join(base_path, relative_path)
+
+def procesar_contactos():
+    base_dir = config['base_dir']
+
+    # Carpeta donde se guardará el Excel de verificación
+    output_dir = os.path.join(base_dir, "output", "tel_verif")
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Carpeta donde buscará los PDFs
+    directorio_tel = os.path.join(base_dir, "output", "prueba")
+    os.makedirs(directorio_tel, exist_ok=True)
+
+    contactos_archivos = []
+    contactos = []
+
+    for archivo in os.listdir(directorio_tel):
+        if archivo.lower().endswith(".pdf") and "!" in archivo:
+            ruta_completa = os.path.join(directorio_tel, archivo)
+            base = archivo.removesuffix(".pdf")
+            partes = base.split("!")
+            if len(partes) == 3:
+                nombre, cc, telefono = partes
+                contactos.append({
+                    "C.c": cc,
+                    "nombre": nombre,
+                    "celular": telefono,
+                    "verificado": None
+                })
+                numero_formateado = "+57" + telefono
+                contactos_archivos.append({
+                    "numero": numero_formateado,
+                    "archivo": ruta_completa
+                })
+
+    # Guardar en Excel
+    output_path = os.path.join(output_dir, "tel_verificacion.xlsx")
+    pd.DataFrame(contactos).to_excel(output_path, index=False)
+
+    return contactos_archivos
+
+
+if __name__ == "__main__":
+    
+    ruta_archivo_excel = './data/IMPRESION 2 JULIO.xlsx' 
+    ReporteCliente().generar_reportes()
+    contactos_archivos = procesar_contactos()
+
+    if contactos_archivos:
+        sender = WhatsAppSender(contacts=contactos_archivos,
+                                mensaje=config["menssage_whatsApp"],
+                                profile_path=config['profile_path'],
+                                attach_buuton=config["attach_button"],
+                                document_button=config["document_button"],
+                                no_contact_button=config["no_contact_button"])
+        sender.main()
+    else:
+        print("⚠️ No se encontraron archivos PDF válidos para enviar.")
