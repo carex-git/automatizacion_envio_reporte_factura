@@ -43,7 +43,7 @@ class ConfiguracionReporte:
     DIRECTORIO_SALIDA = 'output'
     RUTA_LOGO = './logo.png'
     
-    # Información de la empresa
+    # Información de la empresa (valores por defecto - ahora se pueden sobrescribir)
     EMPRESA_NIT = '800.176.428-6'
     EMPRESA_NOMBRE = 'COMERCIALIZADORA INTERNACIONAL CARIBBEAN EXOTICS S. A.'
     EMPRESA_DIRECCION = 'Vda cimarronas Km 1 Rionegro-Marinilla'
@@ -196,7 +196,6 @@ class GestorDatos:
             'telefono': '',
             'email': ''
         }
-        print("soy cedula: ",cedula)
         
         if not self.df_bd_pro.empty and cedula:
             cliente_info = self.df_bd_pro[
@@ -212,8 +211,6 @@ class GestorDatos:
                 if 'Ciudad' in cliente_info.columns and pd.notna(fila['Ciudad']):
                     info['municipio'] = str(fila['Ciudad'])
                     
-                if 'Email' in cliente_info.columns and pd.notna(fila['Email']):
-                    info['email'] = str(fila['Email'])
                     
         if not self.df_tel_email.empty and cedula:
             telefono_info = self.df_tel_email[
@@ -222,8 +219,18 @@ class GestorDatos:
             
             if not telefono_info.empty:
                 fila_tel = telefono_info.iloc[0]
-                if 'CELULAR 1' in telefono_info.columns and pd.notna(fila_tel['CELULAR 1'] and fila_tel['CELULAR 1'] != '0' and fila_tel['CELULAR 1'] != 0):
-                    info['telefono'] = str(fila_tel['CELULAR 1'])
+                if 'WHATSAPP' in telefono_info.columns and pd.notna(fila_tel['WHATSAPP'] and fila_tel['WHATSAPP'] != '0' and fila_tel['WHATSAPP'] != 0):
+                    info['telefono'] = str(fila_tel['WHATSAPP'])
+                    
+        if not self.df_tel_email.empty and cedula:
+            telefono_info = self.df_tel_email[
+                self.df_tel_email['CEDULA'].astype(str) == str(cedula)
+            ]
+            
+            if not telefono_info.empty:
+                fila_tel = telefono_info.iloc[0]
+                if 'EMAIL 1' in telefono_info.columns and pd.notna(fila_tel['EMAIL 1'] and fila_tel['EMAIL 1'] != '0' and fila_tel['EMAIL 1'] != 0):
+                    info['email'] = str(fila_tel['EMAIL 1'])
         
         return info
     
@@ -268,7 +275,7 @@ class GestorDatos:
         return certificaciones
 
 
-class ReporteCliente(FPDF):
+class ReporteProveedor(FPDF):
     """
     Clase principal para generar reportes de facturación en PDF
     
@@ -276,13 +283,28 @@ class ReporteCliente(FPDF):
     para generar reportes de compra con formato personalizado.
     """
     
-    def __init__(self):
-        """Inicializa el generador de reportes"""
+    def __init__(self, nit_empresa: Optional[str] = None, nombre_empresa: Optional[str] = None, 
+                 direccion_empresa: Optional[str] = None, subtitle: Optional[str] = None):
+        """
+        Inicializa el generador de reportes con configuración dinámica de empresa
+        
+        Args:
+            nit_empresa: NIT de la empresa (opcional)
+            nombre_empresa: Nombre de la empresa (opcional)
+            direccion_empresa: Dirección de la empresa (opcional)
+        """
         super().__init__(
             ConfiguracionReporte.ORIENTACION, 
             ConfiguracionReporte.UNIDAD, 
             ConfiguracionReporte.FORMATO
         )
+        
+        # Configurar información de la empresa (usar valores dinámicos o por defecto)
+        self.empresa_nit = nit_empresa or ConfiguracionReporte.EMPRESA_NIT
+        self.empresa_nombre = nombre_empresa or ConfiguracionReporte.EMPRESA_NOMBRE
+        self.empresa_direccion = direccion_empresa or ConfiguracionReporte.EMPRESA_DIRECCION
+        self.subtitle = subtitle
+        
         self._configurar_pdf()
         self._crear_directorio_salida()
         self.certificacion_flo = ""
@@ -339,7 +361,7 @@ class ReporteCliente(FPDF):
     
     def _agregar_subtitulo(self):
         """Agrega el subtítulo del documento"""
-        subtitle = 'SEGUNDA QUINCENA DE JULIO'
+        subtitle = self.subtitle
         x_posicion = self.w / 2 - self.get_string_width(subtitle) / 2
         self.set_x(x_posicion)
         self.set_font('Helvetica', '', 12)
@@ -431,7 +453,8 @@ class ReporteCliente(FPDF):
         y_inicio = self.get_y()
         x_inicio = self.get_x()
         
-        comprador_text = ConfiguracionReporte.EMPRESA_NOMBRE
+        # Usar la información dinámica de la empresa
+        comprador_text = self.empresa_nombre
         nombre_cliente = str(datos_cliente.iloc[0]['NOMBRE'])
         
         ancho_etiqueta_izq = ancho_izq * 0.35
@@ -461,7 +484,8 @@ class ReporteCliente(FPDF):
         x_inicio = self.get_x()
         
         cedula_cliente = str(datos_cliente.iloc[0]['CEDULA'])
-        nit_empresa = ConfiguracionReporte.EMPRESA_NIT
+        # Usar el NIT dinámico de la empresa
+        nit_empresa = self.empresa_nit
         
         ancho_etiqueta_izq = ancho_izq * 0.35
         ancho_valor_izq = ancho_izq * 0.65
@@ -490,7 +514,8 @@ class ReporteCliente(FPDF):
         x_inicio = self.get_x()
         
         direccion_cliente = info_adicional.get('direccion', 'Vda cimarronas Km 1 Rionegro-Marinilla')
-        direccion_empresa = ConfiguracionReporte.EMPRESA_DIRECCION
+        # Usar la dirección dinámica de la empresa
+        direccion_empresa = self.empresa_direccion
         
         ancho_etiqueta_izq = ancho_izq * 0.35
         ancho_valor_izq = ancho_izq * 0.65
@@ -923,9 +948,16 @@ class ReporteCliente(FPDF):
         self.cell(ancho_celda, altura_celda, UtilFormato.formatear_moneda(valores['total_documento']), border=1, align='R', fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
 
-    def generar_reportes(self,archivo_excel: str):
+    def generar_reportes(archivo_excel: str, nit_empresa: Optional[str] = None, 
+                        nombre_empresa: Optional[str] = None, direccion_empresa: Optional[str] = None, subtitle : Optional[str] = None):
         """
-        Función principal para cargar datos y generar reportes PDF.
+        Función principal para cargar datos y generar reportes PDF con configuración dinámica de empresa.
+        
+        Args:
+            archivo_excel: Ruta del archivo Excel con los datos
+            nit_empresa: NIT de la empresa (opcional)
+            nombre_empresa: Nombre de la empresa (opcional) 
+            direccion_empresa: Dirección de la empresa (opcional)
         """
         try:
             gestor_datos = GestorDatos(archivo_excel)
@@ -954,7 +986,13 @@ class ReporteCliente(FPDF):
                     # Pasar el tipo de certificación a la función obtener_certificacion
                     certificaciones = gestor_datos.obtener_certificacion(cedula, cert_tipo_liquidacion)
                     
-                    reporte = ReporteCliente()
+                    # 🔥 MODIFICACIÓN PRINCIPAL: Pasar los parámetros dinámicos al constructor
+                    reporte = ReporteProveedor(
+                        nit_empresa=nit_empresa,
+                        nombre_empresa=nombre_empresa, 
+                        direccion_empresa=direccion_empresa,
+                        subtitle=subtitle
+                    )
                     reporte.add_page()
                     reporte.establecer_certificacion(certificaciones)
                     reporte.agregar_informacion_cliente(datos_cliente, info_adicional)
@@ -987,8 +1025,4 @@ class ReporteCliente(FPDF):
 
         except (FileNotFoundError, ValueError) as e:
             print(f"❌ Error crítico: {e}")
-if __name__ == '__main__':
-    # Ruta de tu archivo Excel
-    ruta_archivo_excel = './data/IMPRESION 2 JULIO.xlsx' 
-    
-    ReporteCliente().generar_reportes(ruta_archivo_excel)
+
