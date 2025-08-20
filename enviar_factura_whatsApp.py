@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import json
 import time
-from WhatsAppSender import WhatsAppSender
+from WhatsAppSender import WhatsAppSafeSender
 from Reporte_Proveedor import ReporteProveedor
 
 # Cargar configuración
@@ -18,7 +18,7 @@ def procesar_contactos():
     os.makedirs(output_dir, exist_ok=True)
 
     # Carpeta donde buscará los PDFs
-    directorio_tel = os.path.join(base_dir, "dist", "output", "prueba")
+    directorio_tel = os.path.join(base_dir,"dist", "output", "prueba")
 
     contactos_archivos = []
     contactos = []
@@ -58,12 +58,13 @@ if __name__ == "__main__":
         enviados_dir = os.path.join(directorio_tel, "enviados")
         
         # Se pasa la ruta de la carpeta de enviados al constructor
-        sender = WhatsAppSender(contacts=contactos_archivos,
+        sender = WhatsAppSafeSender(contacts=contactos_archivos,
+                                send_buttons=config['send_buttons'],
                                 mensaje=config["menssage_whatsApp"],
                                 profile_path=config['profile_path'],
-                                attach_button=config["attach_button"],
-                                document_button=config["document_button"],
-                                no_contact_button=config["no_contact_button"],
+                                attach_buttons=config["attach_buttons"],
+                                document_buttons=config["document_buttons"],
+                                no_contact_buttons=config["no_contact_buttons"],
                                 enviados_dir=enviados_dir)
         
         sender.main()

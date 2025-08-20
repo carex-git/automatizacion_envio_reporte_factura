@@ -1,0 +1,12 @@
+pandas
+fpdf2
+pyautogui
+opencv-python
+numpy
+selenium
+webdriver-manager
+openpyxl
+pyinstaller
+matplotlib
+plotly
+xlwings
