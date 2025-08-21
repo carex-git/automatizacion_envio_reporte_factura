@@ -1,7 +1,6 @@
 import os
 import pandas as pd
 import json
-import time
 from WhatsAppSender import WhatsAppSafeSender
 from Reporte_Proveedor import ReporteProveedor
 

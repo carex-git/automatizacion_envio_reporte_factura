@@ -234,47 +234,54 @@ class GestorDatos:
         
         return info
     
-    def obtener_certificacion(self, cedula: str, cert_tipo: str) -> Dict[str, str]:
+    def obtener_certificacion(self, cedula: str, cer_type: str) -> Dict[str, str]:
         """
         Determina las certificaciones de un cliente buscando su cédula en
         la hoja 'CER FL GL' y devuelve los datos en un diccionario.
+        Considera todas las entradas del cliente.
         """
+
+        print(cer_type)
         certificaciones = {'flo': '', 'gap': ''}
         
         if pd.isna(cedula) or not str(cedula).strip():
             return certificaciones
 
         if not self.df_cer_fl_gl.empty:
-            # Buscar por cédula en la hoja de certificaciones
-            
+            # Buscar TODAS las filas que coincidan con la cédula
             cert_info = self.df_cer_fl_gl[
                 self.df_cer_fl_gl['CEDULA'].astype(str) == str(cedula)
+            
             ]
 
-            if not cert_info.empty:
-                fila = cert_info.iloc[0]
-                cert_tipo = cert_tipo.upper().strip()
-
-                if 'FL' in cert_tipo:
+            # Solo procesar FL si el tipo de certificación lo incluye
+            if 'FL' in cer_type:
+                # Buscar información FL en cualquier fila del cliente
+                for _, fila in self.df_cer_fl_gl.iterrows():
                     id_asoc = str(fila.get('CERTIFICADO ASOC', '')).strip()
                     id_carex = str(fila.get('CERTIFICADO CAREX', '')).strip()
                     
                     if id_asoc or id_carex:
                         certificaciones['flo'] = (
                             "CERTIFICADO FLO\n"
-                            f"ID. ASOC. {id_asoc}\n"
-                            f"ID. CAREX {id_carex}"
+                            f"{id_asoc}\n"
+                            f"{id_carex}"
                         )
-
-                if 'GL' in cert_tipo:
+                        break  # Tomar la primera información válida encontrada
+            
+            # Solo procesar GL si el tipo de certificación lo incluye  
+            if 'GL' in cer_type:
+                # Buscar información GL en cualquier fila del cliente
+                for _, fila in cert_info.iterrows():
                     ggn = str(fila.get('CERTIFICADO GLO', '')).strip()
                     codigo = str(fila.get('CODIGO', '')).strip()
+                    
                     if ggn:
                         certificaciones['gap'] = f"GLOBALG.A.P.\n{codigo}"
+                        break  # Tomar la primera información válida encontrada
         
         return certificaciones
-
-
+    
 class ReporteProveedor(FPDF):
     """
     Clase principal para generar reportes de facturación en PDF
@@ -974,8 +981,21 @@ class ReporteProveedor(FPDF):
                 try:
                     nombre = datos_cliente['NOMBRE'].iloc[0]
                     
-                    # Obtener el tipo de certificación de la columna 'FL-GL' del DataFrame principal
-                    cert_tipo_liquidacion = str(datos_cliente['FL-GL'].iloc[0]).upper().strip()
+                    # 🔥 REVISAR TODAS LAS FILAS DEL CLIENTE PARA CERTIFICACIONES
+                    valores_certificacion = datos_cliente['FL-GL'].astype(str).str.upper().str.strip()
+                    
+                    tiene_fl = valores_certificacion.str.contains('FL', na=False).any()
+                    tiene_gl = valores_certificacion.str.contains('GL', na=False).any()
+                    
+                    # Determinar el tipo de certificación basado en lo que encontramos
+                    if tiene_fl and tiene_gl:
+                        cert_tipo_liquidacion = "FL-GL"
+                    elif tiene_fl:
+                        cert_tipo_liquidacion = "FL"
+                    elif tiene_gl:
+                        cert_tipo_liquidacion = "GL"
+                    else:
+                        cert_tipo_liquidacion = "SIN CERTIFICACIÓN"
                     
                     info_adicional = gestor_datos.obtener_info_cliente(cedula)
                     
@@ -984,7 +1004,7 @@ class ReporteProveedor(FPDF):
                     email = info_adicional.get('email','')
                     
                     # Pasar el tipo de certificación a la función obtener_certificacion
-                    certificaciones = gestor_datos.obtener_certificacion(cedula, cert_tipo_liquidacion)
+                    certificaciones = gestor_datos.obtener_certificacion(cedula,cert_tipo_liquidacion)
                     
                     # 🔥 MODIFICACIÓN PRINCIPAL: Pasar los parámetros dinámicos al constructor
                     reporte = ReporteProveedor(
@@ -1025,4 +1045,3 @@ class ReporteProveedor(FPDF):
 
         except (FileNotFoundError, ValueError) as e:
             print(f"❌ Error crítico: {e}")
-

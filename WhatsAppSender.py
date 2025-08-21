@@ -129,7 +129,7 @@ class WhatsAppSafeSender:
 
         self.mensajes_variados = [
             "Hola {nombre}, {mensaje}",
-            "Buenos días {nombre}, {mensaje}",
+            "Espero este muy bien {nombre}, {mensaje}",
             "Estimado/a {nombre}, {mensaje}",
             "{nombre}, {mensaje}",
             "Saludos {nombre}, {mensaje}"
@@ -236,70 +236,97 @@ class WhatsAppSafeSender:
             if i > 0 and i % random.randint(15, 25) == 0:
                 time.sleep(random.uniform(0.3, 0.8))
 
-        print(f"✅ Texto escrito de forma humana: '{text[:50]}{'...' if len(text) > 50 else ''}'")
 
-
+    def _contacto_no_encontrado_por_imagen(self):
+        """
+        Verifica si alguna de las plantillas de 'no contacto' está visible en pantalla.
+        Retorna True si alguna se encuentra, False en caso contrario.
+        """
+        # Se asegura de que la variable sea iterable, incluso si solo es un string
+        templates = self.NO_CONTACT_TEMPLATE if isinstance(self.NO_CONTACT_TEMPLATE, list) else [self.NO_CONTACT_TEMPLATE]
+        
+        for template_path in templates:
+            try:
+                # Intenta localizar la imagen en pantalla.
+                pyautogui.locateOnScreen(template_path, confidence=0.8, grayscale=True)
+                return True
+            except ImageNotFoundException:
+                # Si la imagen no se encuentra, continuar con la siguiente.
+                print(f"❌ Imagen '{template_path}' no encontrada, buscando siguiente.")
+                continue
+            except Exception as e:
+                # Maneja errores como una ruta de archivo inválida.
+                print(f"⚠️ Error al procesar '{template_path}': {e}")
+                continue
+        return False
 
     def abrir_chat_con_contacto(self, driver, wait, numero):
+        """
+        Intenta abrir un chat con un contacto. Primero lo busca, si falla,
+        intenta abrirlo por URL.
+        """
+        # 1. Verificar si hay un problema o bloqueo antes de continuar.
         problema, texto = self.detectar_bloqueo_o_problema(driver)
         if problema:
             print(f"🚨 DETENIENDO: {texto}")
             return False
 
-        chat_abierto = False
+        # 2. Intentar buscar el contacto y abrir el chat.
+        print(f"🔎 Buscando contacto {numero}...")
         try:
             search_box = wait.until(EC.element_to_be_clickable((By.XPATH, self.SEARCH_BOX_XPATH)))
             search_box.clear()
             time.sleep(random.uniform(1, 2))
             self.escribir_como_humano(search_box, numero)
             time.sleep(random.uniform(3, 5))
-            try:
-                if pyautogui.locateOnScreen(self.NO_CONTACT_TEMPLATE, confidence=0.8, grayscale=True):
-                    print(f"❌ Contacto {numero} no encontrado en la búsqueda.")
-                    search_box.clear()
-                    search_box.send_keys(Keys.ESCAPE)
-                else:
-                    print(f"✅ Contacto {numero} encontrado en la búsqueda. Abriendo chat…")
-                    search_box.send_keys(Keys.ENTER)
-                    time.sleep(random.uniform(2, 4))
-                    wait.until(EC.presence_of_element_located((By.XPATH, self.MESSAGE_BOX_XPATH)))
-                    chat_abierto = True
-            except ImageNotFoundException:
-                print(f"✅ Contacto {numero} encontrado en la búsqueda. Abriendo chat…")
+
+            # 3. Validar si el contacto se encontró o no usando las imágenes.
+            if self._contacto_no_encontrado_por_imagen():
+                # Si la función auxiliar retorna True, significa que no se encontró el contacto.
+                print(f"❌ Contacto {numero} no encontrado en la búsqueda.")
+                search_box.clear()
+                search_box.send_keys(Keys.ESCAPE)
+                return self._abrir_chat_con_url(driver, wait, numero)
+            else:
+                # Si la función auxiliar retorna False, asumimos que el contacto sí se encontró.
+                print(f"✅ Contacto {numero} encontrado. Abriendo chat...")
                 search_box.send_keys(Keys.ENTER)
-                time.sleep(random.uniform(2, 4))
                 wait.until(EC.presence_of_element_located((By.XPATH, self.MESSAGE_BOX_XPATH)))
-                chat_abierto = True
-
+                return True
+        
         except Exception as e:
-            print(f"⚠️ Error al buscar contacto con Selenium y PyAutoGUI: {e}.")
+            # Si ocurre cualquier error en el proceso de búsqueda (por ejemplo, el cuadro de búsqueda no es clickable)
+            print(f"⚠️ Error en el método de búsqueda de contacto: {e}.")
+            return self._abrir_chat_con_url(driver, wait, numero)
 
-        if not chat_abierto:
-            try:
-                print(f"🔄 Intentando abrir el chat para {numero} usando URL directa…")
-                driver.get(f"https://web.whatsapp.com/send?phone={numero}")
-                time.sleep(random.uniform(3, 6))
-                wait.until(EC.any_of(
-                    EC.presence_of_element_located((By.XPATH, self.MESSAGE_BOX_XPATH)),
-                    EC.presence_of_element_located((By.XPATH, self.INVALID_PHONE_XPATH))
-                ))
-                if len(driver.find_elements(By.XPATH, self.INVALID_PHONE_XPATH)) > 0:
-                    print(f"❌ El número {numero} no es un usuario válido de WhatsApp.")
-                    driver.get("https://web.whatsapp.com")
-                    self.esperar_whatsapp_cargado(wait)
-                    return False
-                else:
-                    print(f"✅ Chat abierto para {numero} usando URL directa.")
-                    chat_abierto = True
-            except TimeoutException as e:
-                print(f"❌ Falló el método de URL directa para {numero}. Error de tiempo de espera: {e}")
+    def _abrir_chat_con_url(self, driver, wait, numero):
+        """Método auxiliar para abrir un chat usando la URL directa."""
+        print(f"🔄 Intentando abrir el chat para {numero} usando URL directa...")
+        try:
+            driver.get(f"https://web.whatsapp.com/send?phone={numero}")
+            time.sleep(random.uniform(3, 6))
+            
+            wait.until(EC.any_of(
+                EC.presence_of_element_located((By.XPATH, self.MESSAGE_BOX_XPATH)),
+                EC.presence_of_element_located((By.XPATH, self.INVALID_PHONE_XPATH))
+            ))
+            
+            if driver.find_elements(By.XPATH, self.INVALID_PHONE_XPATH):
+                print(f"❌ El número {numero} no es un usuario válido de WhatsApp.")
                 driver.get("https://web.whatsapp.com")
                 self.esperar_whatsapp_cargado(wait)
-            except NoSuchWindowException:
-                print("❌ Se cerró la ventana del navegador. Terminando el script.")
                 return False
+            else:
+                print(f"✅ Chat abierto para {numero} usando URL directa.")
+                return True
+                
+        except (TimeoutException, NoSuchWindowException) as e:
+            print(f"❌ Falló el método de URL directa para {numero}: {e}.")
+            driver.get("https://web.whatsapp.com")
+            self.esperar_whatsapp_cargado(wait)
+            return False
 
-        return chat_abierto
+
     def generar_mensaje_personalizado(self, nombre):
 
         """Genera un mensaje personalizado y variado"""
@@ -311,33 +338,76 @@ class WhatsAppSafeSender:
 
         return plantilla.format(nombre=primer_nombre, mensaje=self.MENSAJE)
     
+
     def click_image(self, template_paths, confidence=0.8, timeout=15):
+        """
+        Busca múltiples templates y hace clic en el que tenga mejor coincidencia.
+        Ahora evalúa TODAS las plantillas antes de decidir cuál usar.
+        """
         start_time = time.time()
         if isinstance(template_paths, str):
             template_paths = [template_paths]
 
-        while time.time() - start_time < timeout:
-            try:
-                for template_path in template_paths:
-                    if not os.path.exists(template_path):
-                        print(f"⚠️ Archivo no encontrado: {template_path}")
-                        continue
+        # Filtrar plantillas que existen
+        templates_validos = [t for t in template_paths if os.path.exists(t)]
+        if not templates_validos:
+            return False
 
-                    location = pyautogui.locateCenterOnScreen(template_path, confidence=confidence, grayscale=True)
-                    if location:
-                        offset_x = random.randint(-2, 2)
-                        offset_y = random.randint(-2, 2)
-                        pyautogui.click(location.x + offset_x, location.y + offset_y)
-                        print(f"✅ Clic en la imagen: {template_path}")
-                        return True
-            except pyautogui.PyAutoGUIException:
-                pass
+
+        while time.time() - start_time < timeout:
+            todas_coincidencias = []
+            
+            try:
+                # Evaluar TODAS las plantillas primero
+                for i, template_path in enumerate(templates_validos):
+                    try:
+                        # Buscar todas las ubicaciones posibles para este template
+                        ubicaciones = list(pyautogui.locateAllOnScreen(
+                            template_path, 
+                            confidence=confidence, 
+                            grayscale=True
+                        ))
+                        
+                        for ubicacion in ubicaciones:
+                            centro = pyautogui.center(ubicacion)
+                            todas_coincidencias.append({
+                                'template_path': template_path,
+                                'template_index': i,
+                                'ubicacion': ubicacion,
+                                'centro': centro,
+                                'nombre': os.path.basename(template_path)
+                            })
+                            
+                    except pyautogui.ImageNotFoundException:
+                        continue
+                    except Exception as e:
+                        continue
+                
+                if todas_coincidencias:
+                    # Usar la primera coincidencia (pyautogui ya las ordena por mejor match)
+                    mejor_match = todas_coincidencias[0]
+                    
+                    # Añadir offset aleatorio para simular comportamiento humano
+                    offset_x = random.randint(-2, 2)
+                    offset_y = random.randint(-2, 2)
+                    
+                    click_x = mejor_match['centro'].x + offset_x
+                    click_y = mejor_match['centro'].y + offset_y
+                    
+                    pyautogui.click(click_x, click_y)
+                    return True
+                    
+            except Exception as e:
+                print(f"⚠️ Error general en evaluación de templates: {e}")
+            
+            # Esperar antes del siguiente intento
             time.sleep(1)
 
-        print(f"❌ No se encontró ninguna de las imágenes: {template_paths}")
+        # Si llegamos aquí, no se encontró nada
+        plantillas_nombres = [os.path.basename(t) for t in templates_validos]
         return False
-
-
+    
+    
     def verificar_estado_chat(self, driver):
         """Verifica si el chat se cargó correctamente"""
         try:
@@ -374,12 +444,13 @@ class WhatsAppSafeSender:
             self.escribir_como_humano(message_box, mensaje_personalizado)
             time.sleep(random.uniform(1, 2))
 
-            if not self.click_image(self.ATTACH_BUTTON_TEMPLATE):
+            if not self.click_image(self.ATTACH_BUTTON_TEMPLATE, confidence=0.8, timeout=10):
                 print(f"❌ Fallo al hacer clic en el botón de adjuntar para {numero}.")
                 return False
             time.sleep(random.uniform(1, 2))
 
-            if not self.click_image(self.DOCUMENT_BUTTON_TEMPLATE):
+            print("🔍 Buscando botón de documento...")
+            if not self.click_image(self.DOCUMENT_BUTTON_TEMPLATE, confidence=0.8, timeout=10):
                 print(f"❌ Fallo al hacer clic en el botón de documento para {numero}.")
                 return False
             time.sleep(random.uniform(3, 5))
@@ -398,7 +469,8 @@ class WhatsAppSafeSender:
                 print(f"🚨 PROBLEMA DETECTADO ANTES DEL ENVÍO FINAL: {texto}")
                 return False
 
-            if not self.click_image(self.SEND_BUTTON_TEMPLATE):
+            print("🔍 Buscando botón de enviar...")
+            if not self.click_image(self.SEND_BUTTON_TEMPLATE, confidence=0.8, timeout=10):
                 print(f"❌ No se pudo encontrar el botón de enviar para {numero}.")
                 return False
             time.sleep(random.uniform(3, 5))
@@ -408,12 +480,11 @@ class WhatsAppSafeSender:
                 print(f"⚠️ Posible problema después del envío: {mensaje_estado}")
 
             print(f"✅ Documento enviado a {numero}")
+            return True
 
         except Exception as e:
             print(f"❌ Error al enviar el documento para {numero}: {e}")
             return False
-
-        return True
 
     def mover_archivo_enviado(self, archivo, index):
         if not os.path.exists(self.enviados_dir):

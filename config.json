@@ -1,22 +1,22 @@
 {
     "base_dir": "C:/Users/aprsistemas/OneDrive - CAREX/Escritorio/trabajo/automatizacion_envio_reporte_factura",
     "ruta_file": "/data/IMPRESION 2 JULIO.xlsx",
-    "nombre_documento": "SEGUNDA QUINCENA DE JULIO",
+    "nombre_documento": "PRIMERA QUINCENA DE AGOSTO",
     "nit_empresa" : "800.176.428-6", 
     "nombre_empresa" : "COMERCIALIZADORA INTERNACIONAL CARIBBEAN EXOTICS S. A.",
     "direccion_empresa" : "Vda cimarronas Km 1 Rionegro-Marinilla",
     "profile_path" : "C:/Users/aprsistemas/AppData/Local/Google/Chrome/User Data/WhatsAppSession",
-    "menssage_whatsApp": "Te envío el documento que me pediste",
+    "menssage_whatsApp": "envio reporte de la primera quincena de agosto",
 
-    "send_buttons": ["C:/Users/aprsistemas/OneDrive - CAREX/Escritorio/trabajo/automatizacion_envio_reporte_factura/send_button_template.png",
-        "C:/Users/aprsistemas/OneDrive - CAREX/Escritorio/trabajo/automatizacion_envio_reporte_factura/send_button_template2.png"],
+    "send_buttons": ["C:/Users/aprsistemas/OneDrive - CAREX/Escritorio/trabajo/automatizacion_envio_reporte_factura/send_button_template2.png",
+        "C:/Users/aprsistemas/OneDrive - CAREX/Escritorio/trabajo/automatizacion_envio_reporte_factura/send_button_template.png"],
 
-    "attach_buttons": ["C:/Users/aprsistemas/OneDrive - CAREX/Escritorio/trabajo/automatizacion_envio_reporte_factura/attach_button_template.png",
+    "attach_buttons": ["C:/Users/aprsistemas/OneDrive - CAREX/Escritorio/trabajo/automatizacion_envio_reporte_factura/attach_button_template2.png",
         "C:/Users/aprsistemas/OneDrive - CAREX/Escritorio/trabajo/automatizacion_envio_reporte_factura/attach_button_template.png"], 
 
-    "document_buttons": ["C:/Users/aprsistemas/OneDrive - CAREX/Escritorio/trabajo/automatizacion_envio_reporte_factura/document_button_template.png",
-        "C:/Users/aprsistemas/OneDrive - CAREX/Escritorio/trabajo/automatizacion_envio_reporte_factura/document_button_template2.png"], 
+    "document_buttons": ["C:/Users/aprsistemas/OneDrive - CAREX/Escritorio/trabajo/automatizacion_envio_reporte_factura/document_button_template2.png",
+        "C:/Users/aprsistemas/OneDrive - CAREX/Escritorio/trabajo/automatizacion_envio_reporte_factura/document_button_template.png"], 
         
-    "no_contact_buttons": ["C:/Users/aprsistemas/OneDrive - CAREX/Escritorio/trabajo/automatizacion_envio_reporte_factura/no_contact_template.png",
+    "no_contact_buttons": ["C:/Users/aprsistemas/OneDrive - CAREX/Escritorio/trabajo/automatizacion_envio_reporte_factura/no_contact_template2.png",
         "C:/Users/aprsistemas/OneDrive - CAREX/Escritorio/trabajo/automatizacion_envio_reporte_factura/no_contact_template.png"]
 }

@@ -29,7 +29,7 @@ with open("config.json", "r", encoding="utf-8") as f:
 
 # Carpeta donde están los PDFs
 base_dir = os.path.dirname(os.path.abspath(__file__))
-directorio_email = os.path.join(base_dir, "dist", "output", "prueba 2")
+directorio_email = os.path.join(base_dir, "dist", "output", "email")
 
 # Crear la carpeta de enviados
 enviados_dir = os.path.join(directorio_email, "enviados")
