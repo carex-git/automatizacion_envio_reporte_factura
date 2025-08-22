@@ -55,7 +55,7 @@ print(f"\nLista final de contactos: {email_archivos}")
 
 # Pasar contactos a la clase y ejecutar
 if email_archivos:
-    email_sender = ReportEmailSender("cm090457@gmail.com", "xrjw xnuz jtox qrmv", "asunto", "cuerpo")
+    email_sender = ReportEmailSender("", "", "asunto", "cuerpo")
     exitosos = 0
     fallidos = 0
     conteo_enviados = 1

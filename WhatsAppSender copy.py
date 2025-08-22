@@ -21,7 +21,7 @@ import pyautogui
 
 
 class QuotaManager:
-    def __init__(self, limite_diario=100, limite_horario=50):
+    def __init__(self, limite_diario=40, limite_horario=40):
         self.limite_diario = limite_diario
         self.limite_horario = limite_horario
         self.archivo_datos = "quota_data.pkl"
@@ -96,11 +96,11 @@ class QuotaManager:
 
     def obtener_tiempo_espera_recomendado(self):
         if len(self.historial_horas) >= self.limite_horario - 2:
-            return random.uniform(10, 13)
+            return random.uniform(60, 90)
         elif self.mensajes_hoy >= self.limite_diario - 5:
-            return random.uniform(6, 10)
+            return random.uniform(40, 60)
         else:
-            return random.uniform(2, 6)
+            return random.uniform(20, 40)
 
 
 class WhatsAppSafeSender:
@@ -219,22 +219,22 @@ class WhatsAppSafeSender:
         return False, None
     
 
-    def escribir_como_humano(self, element, text, min_delay=0.002, max_delay=0.03):
+    def escribir_como_humano(self, element, text, min_delay=0.02, max_delay=0.15):
         """Escribe texto simulando comportamiento humano más realista"""
         for i, char in enumerate(text):
             element.send_keys(char)
 
             if char in [' ', '.', ',', '!', '?']:
-                delay = random.uniform(max_delay * 0.8, max_delay * 1.1)
+                delay = random.uniform(max_delay * 1.5, max_delay * 3)
             elif char.isalpha():
                 delay = random.uniform(min_delay, max_delay)
             else:
-                delay = random.uniform(min_delay * 0.7, max_delay * 0.9)
+                delay = random.uniform(min_delay * 1.2, max_delay * 1.2)
 
             time.sleep(delay)
 
             if i > 0 and i % random.randint(15, 25) == 0:
-                time.sleep(random.uniform(0.2, 0.5))
+                time.sleep(random.uniform(0.3, 0.8))
 
 
     def _contacto_no_encontrado_por_imagen(self):
@@ -276,9 +276,9 @@ class WhatsAppSafeSender:
         try:
             search_box = wait.until(EC.element_to_be_clickable((By.XPATH, self.SEARCH_BOX_XPATH)))
             search_box.clear()
-            time.sleep(random.uniform(0.5, 0.9))
-            self.escribir_como_humano(search_box, numero)
             time.sleep(random.uniform(1, 2))
+            self.escribir_como_humano(search_box, numero)
+            time.sleep(random.uniform(3, 5))
 
             # 3. Validar si el contacto se encontró o no usando las imágenes.
             if self._contacto_no_encontrado_por_imagen():
@@ -304,7 +304,7 @@ class WhatsAppSafeSender:
         print(f"🔄 Intentando abrir el chat para {numero} usando URL directa...")
         try:
             driver.get(f"https://web.whatsapp.com/send?phone={numero}")
-            time.sleep(random.uniform(2, 4))
+            time.sleep(random.uniform(3, 6))
             
             wait.until(EC.any_of(
                 EC.presence_of_element_located((By.XPATH, self.MESSAGE_BOX_XPATH)),
@@ -339,7 +339,7 @@ class WhatsAppSafeSender:
         return plantilla.format(nombre=primer_nombre, mensaje=self.MENSAJE)
     
 
-    def click_image(self, template_paths, confidence=0.8, timeout=10):
+    def click_image(self, template_paths, confidence=0.8, timeout=15):
         """
         Busca múltiples templates y hace clic en el que tenga mejor coincidencia.
         Ahora evalúa TODAS las plantillas antes de decidir cuál usar.
@@ -388,8 +388,8 @@ class WhatsAppSafeSender:
                     mejor_match = todas_coincidencias[0]
                     
                     # Añadir offset aleatorio para simular comportamiento humano
-                    offset_x = random.randint(-1, 1)
-                    offset_y = random.randint(-1, 1)
+                    offset_x = random.randint(-2, 2)
+                    offset_y = random.randint(-2, 2)
                     
                     click_x = mejor_match['centro'].x + offset_x
                     click_y = mejor_match['centro'].y + offset_y
@@ -401,7 +401,7 @@ class WhatsAppSafeSender:
                 print(f"⚠️ Error general en evaluación de templates: {e}")
             
             # Esperar antes del siguiente intento
-            time.sleep(0.5)
+            time.sleep(1)
 
         # Si llegamos aquí, no se encontró nada
         plantillas_nombres = [os.path.basename(t) for t in templates_validos]
@@ -440,14 +440,14 @@ class WhatsAppSafeSender:
             message_box = wait.until(EC.presence_of_element_located((By.XPATH, self.MESSAGE_BOX_XPATH)))
             message_box.send_keys(Keys.CONTROL + 'a')
             message_box.send_keys(Keys.DELETE)
-            time.sleep(random.uniform(0.2, 0.7))
+            time.sleep(random.uniform(0.5, 1.0))
             self.escribir_como_humano(message_box, mensaje_personalizado)
-            time.sleep(random.uniform(0.5, 1))
+            time.sleep(random.uniform(1, 2))
 
             if not self.click_image(self.ATTACH_BUTTON_TEMPLATE, confidence=0.8, timeout=10):
                 print(f"❌ Fallo al hacer clic en el botón de adjuntar para {numero}.")
                 return False
-            time.sleep(random.uniform(0.5, 1))
+            time.sleep(random.uniform(1, 2))
 
             print("🔍 Buscando botón de documento...")
             if not self.click_image(self.DOCUMENT_BUTTON_TEMPLATE, confidence=0.8, timeout=10):
@@ -458,11 +458,11 @@ class WhatsAppSafeSender:
             ruta_archivo = os.path.abspath(archivo)
             for char in ruta_archivo:
                 pyautogui.write(char)
-                time.sleep(random.uniform(0.000001, 0.000003))
-            time.sleep(random.uniform(0.1, 0.2))
+                time.sleep(random.uniform(0.001, 0.003))
+            time.sleep(random.uniform(0.5, 1.0))
             pyautogui.press('enter')
             print(f"✅ Archivo seleccionado: {archivo}")
-            time.sleep(random.uniform(2, 5))
+            time.sleep(random.uniform(5, 8))
 
             problema, texto = self.detectar_bloqueo_o_problema(wait._driver)
             if problema:
@@ -473,7 +473,7 @@ class WhatsAppSafeSender:
             if not self.click_image(self.SEND_BUTTON_TEMPLATE, confidence=0.8, timeout=10):
                 print(f"❌ No se pudo encontrar el botón de enviar para {numero}.")
                 return False
-            time.sleep(random.uniform(1, 3))
+            time.sleep(random.uniform(3, 5))
 
             estado_ok, mensaje_estado = self.verificar_estado_chat(wait._driver)
             if not estado_ok:
@@ -511,7 +511,7 @@ class WhatsAppSafeSender:
         variacion = random.uniform(0.5, 0.8)
         tiempo_final = tiempo_espera * variacion
         
-        minutos = tiempo_final / 60*4
+        minutos = tiempo_final / 60*3
         print(f"⏳ Pausando por {minutos:.1f} minutos ({tiempo_final:.0f}s) para evitar detección...")
         
         # Pausa en intervalos para permitir interrupciones

@@ -980,6 +980,8 @@ class ReporteProveedor(FPDF):
             for i, (cedula, datos_cliente) in enumerate(clientes, 1):
                 try:
                     nombre = datos_cliente['NOMBRE'].iloc[0]
+
+                    nombre_limpio = nombre.replace('Ñ', 'N').replace('ñ', 'n')
                     
                     # 🔥 REVISAR TODAS LAS FILAS DEL CLIENTE PARA CERTIFICACIONES
                     valores_certificacion = datos_cliente['FL-GL'].astype(str).str.upper().str.strip()
@@ -1021,25 +1023,25 @@ class ReporteProveedor(FPDF):
                             
                     if telefono: 
                         telefono_limpio = "".join(filter(str.isdigit, telefono))
-                        nombre_pdf = f"{nombre}!{cedula}!{telefono_limpio}.pdf" 
+                        nombre_pdf = f"{nombre_limpio}!{cedula}!{telefono_limpio}.pdf" 
                         ruta_salida = os.path.join(reporte.DIRECTORIO_SALIDA_TEL, nombre_pdf)
                         reporte.output(ruta_salida)
                         
                     elif email and email not in ['no@no.com','2@2.com', '2@2.COM']: 
-                        nombre_pdf = f"{nombre}!{cedula}!{email}.pdf" 
+                        nombre_pdf = f"{nombre_limpio}!{cedula}!{email}.pdf" 
                         ruta_salida = os.path.join(reporte.DIRECTORIO_SALIDA_EMAIL, nombre_pdf)
                         reporte.output(ruta_salida)
                         
                     else:
                         # Si no hay teléfono, usa solo el nombre y la cédula
-                        nombre_pdf = f"{nombre}!{cedula}.pdf"
+                        nombre_pdf = f"{nombre_limpio}!{cedula}.pdf"
                         ruta_salida = os.path.join(reporte.DIRECTORIO_SALIDA, nombre_pdf)
                         reporte.output(ruta_salida)
                     
-                    print(f"✅ [{i}/{total_clientes}] Reporte generado para {nombre} (Cédula: {cedula}) - Certificación: {cert_tipo_liquidacion}")
+                    print(f"✅ [{i}/{total_clientes}] Reporte generado para {nombre_limpio} (Cédula: {cedula}) - Certificación: {cert_tipo_liquidacion}")
 
                 except Exception as e:
-                    print(f"❌ [{i}/{total_clientes}] Error generando reporte para {nombre} (Cédula: {cedula}): {repr(e)}")
+                    print(f"❌ [{i}/{total_clientes}] Error generando reporte para {nombre_limpio} (Cédula: {cedula}): {repr(e)}")
                     
             print("\n✅ Todos los reportes han sido generados exitosamente.")
 
